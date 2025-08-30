@@ -339,7 +339,7 @@ If you use this pipeline, please cite:
 @software{wgs_analysis_pipeline,
   title = {Whole Genome Sequencing Analysis Pipeline},
   year = {2025},
-  url = {https://github.com/yourusername/wgs-analysis-pipeline}
+  url = {https://github.com/hilo-hilo/wgs-analysis-pipeline}
 }
 ```
 
