@@ -2,34 +2,203 @@
 
 # WGS Quality Control Analysis Script
 # This script performs comprehensive quality control analysis on raw FASTQ files
-# Usage: ./scripts/quality_control.sh
+# Usage: ./scripts/quality_control.sh [OPTIONS]
 
 set -e  # Exit on any error
 
-# Configuration
+# Script version and info
+SCRIPT_VERSION="2.0"
+SCRIPT_NAME="quality_control.sh"
+
+# Default Configuration (16GB RAM optimized)
 CONDA_ENV="wgs_analysis"
 RAW_DATA_DIR="data/raw"
-OUTPUT_DIR="results/fastqc_raw"
+OUTPUT_DIR="results/quality_control"
 LOG_DIR="logs"
-THREADS=8
+THREADS=4
+DRY_RUN=false
+VERBOSE=false
+FORCE_OVERWRITE=false
+
+# Help function
+show_help() {
+    cat << EOF
+$SCRIPT_NAME v$SCRIPT_VERSION - WGS Quality Control Analysis
+
+DESCRIPTION:
+    Performs quality control analysis optimized for 16GB RAM systems.
+    Uses FastQC with memory-efficient settings for local analysis.
+
+USAGE:
+    $0 [OPTIONS]
+
+OPTIONS:
+    -h, --help              Show this help message and exit
+    -i, --input-dir DIR     Input directory containing FASTQ files (default: $RAW_DATA_DIR)
+    -o, --output-dir DIR    Output directory for results (default: $OUTPUT_DIR)
+    -t, --threads NUM       Number of threads to use (default: $THREADS)
+    -e, --env ENV           Conda environment name (default: $CONDA_ENV)
+    -l, --log-dir DIR       Log directory (default: $LOG_DIR)
+    --dry-run               Show what would be done without executing
+    --force                 Overwrite existing output files
+    --verbose               Enable verbose output
+    --version               Show version information
+
+EXAMPLES:
+    # Basic usage (uses default directories)
+    $0
+
+    # Specify custom input directory
+    $0 --input-dir /path/to/fastq/files
+
+    # Run with more threads
+    $0 --threads 16
+
+    # Dry run to see what will be processed
+    $0 --dry-run
+
+    # Force overwrite of existing results
+    $0 --force --verbose
+
+REQUIREMENTS:
+    - Conda environment '$CONDA_ENV' with FastQC installed
+    - FASTQ files (.fq.gz or .fastq.gz) in input directory
+    - Sufficient disk space for output files
+
+OUTPUT:
+    - FastQC HTML reports for each input file
+    - Quality control summary report
+    - Detailed analysis logs
+
+AUTHOR:
+    WGS Analysis Pipeline
+    https://github.com/your-repo/wgs-analysis-pipeline
+
+EOF
+}
+
+# Version function
+show_version() {
+    echo "$SCRIPT_NAME version $SCRIPT_VERSION"
+    exit 0
+}
 
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Logging function
+# Parse command line arguments
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            --version)
+                show_version
+                ;;
+            -i|--input-dir)
+                RAW_DATA_DIR="$2"
+                shift 2
+                ;;
+            -o|--output-dir)
+                OUTPUT_DIR="$2"
+                shift 2
+                ;;
+            -t|--threads)
+                THREADS="$2"
+                shift 2
+                ;;
+            -e|--env)
+                CONDA_ENV="$2"
+                shift 2
+                ;;
+            -l|--log-dir)
+                LOG_DIR="$2"
+                shift 2
+                ;;
+            --dry-run)
+                DRY_RUN=true
+                shift
+                ;;
+            --force)
+                FORCE_OVERWRITE=true
+                shift
+                ;;
+            --verbose)
+                VERBOSE=true
+                shift
+                ;;
+            *)
+                echo "Unknown option: $1"
+                echo "Use --help for usage information"
+                exit 1
+                ;;
+        esac
+    done
+}
+
+# Logging functions
 log() {
-    echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')]${NC} $1" | tee -a "$LOG_DIR/quality_control.log"
+    local message="$1"
+    local timestamp="[$(date '+%Y-%m-%d %H:%M:%S')]"
+    echo -e "${GREEN}${timestamp}${NC} $message" | tee -a "$LOG_DIR/quality_control.log"
 }
 
 error() {
-    echo -e "${RED}[$(date '+%Y-%m-%d %H:%M:%S')] ERROR:${NC} $1" | tee -a "$LOG_DIR/quality_control.log"
+    local message="$1"
+    local timestamp="[$(date '+%Y-%m-%d %H:%M:%S')]"
+    echo -e "${RED}${timestamp} ERROR:${NC} $message" | tee -a "$LOG_DIR/quality_control.log" >&2
 }
 
 warning() {
-    echo -e "${YELLOW}[$(date '+%Y-%m-%d %H:%M:%S')] WARNING:${NC} $1" | tee -a "$LOG_DIR/quality_control.log"
+    local message="$1"
+    local timestamp="[$(date '+%Y-%m-%d %H:%M:%S')]"
+    echo -e "${YELLOW}${timestamp} WARNING:${NC} $message" | tee -a "$LOG_DIR/quality_control.log"
+}
+
+info() {
+    local message="$1"
+    local timestamp="[$(date '+%Y-%m-%d %H:%M:%S')]"
+    if [[ "$VERBOSE" == "true" ]]; then
+        echo -e "${BLUE}${timestamp} INFO:${NC} $message" | tee -a "$LOG_DIR/quality_control.log"
+    fi
+}
+
+# Progress indicator
+show_progress() {
+    local current=$1
+    local total=$2
+    local desc="$3"
+    local percent=$((current * 100 / total))
+    printf "\rProgress: [%-20s] %d%% %s" $(printf "#%.0s" $(seq 1 $((percent / 5)))) "$percent" "$desc"
+    if [[ $current -eq $total ]]; then
+        echo ""
+    fi
+}
+
+# Validate input parameters
+validate_parameters() {
+    info "Validating parameters..."
+    
+    # Validate threads
+    if ! [[ "$THREADS" =~ ^[0-9]+$ ]] || [[ "$THREADS" -le 0 ]]; then
+        error "Invalid threads value: $THREADS. Must be a positive integer."
+        exit 1
+    fi
+    
+    # Convert relative paths to absolute paths
+    RAW_DATA_DIR=$(realpath "$RAW_DATA_DIR" 2>/dev/null || echo "$RAW_DATA_DIR")
+    OUTPUT_DIR=$(realpath "$OUTPUT_DIR" 2>/dev/null || echo "$OUTPUT_DIR")
+    LOG_DIR=$(realpath "$LOG_DIR" 2>/dev/null || echo "$LOG_DIR")
+    
+    info "Using input directory: $RAW_DATA_DIR"
+    info "Using output directory: $OUTPUT_DIR"
+    info "Using threads: $THREADS"
 }
 
 # Check prerequisites
@@ -38,25 +207,50 @@ check_prerequisites() {
     
     # Check conda environment
     if [[ "$CONDA_DEFAULT_ENV" != "$CONDA_ENV" ]]; then
-        error "Please activate conda environment: conda activate $CONDA_ENV"
+        error "Please activate conda environment first:"
+        echo "  conda activate $CONDA_ENV"
+        echo ""
+        echo "If the environment doesn't exist, create it with:"
+        echo "  conda create -n $CONDA_ENV -c bioconda fastqc"
         exit 1
     fi
     
     # Check FastQC installation
     if ! command -v fastqc &> /dev/null; then
-        error "FastQC not found. Please install FastQC."
+        error "FastQC not found in PATH."
+        echo "Install FastQC with: conda install -c bioconda fastqc"
         exit 1
     fi
     
-    # Check input files
-    if [[ ! -f "$RAW_DATA_DIR/SAMPLE001_L01_UDB-406_1.fq.gz" ]]; then
-        error "Forward reads file not found: $RAW_DATA_DIR/SAMPLE001_L01_UDB-406_1.fq.gz"
+    # Check input directory
+    if [[ ! -d "$RAW_DATA_DIR" ]]; then
+        error "Input directory not found: $RAW_DATA_DIR"
+        echo "Create the directory or specify a different path with --input-dir"
         exit 1
     fi
     
-    if [[ ! -f "$RAW_DATA_DIR/SAMPLE001_L01_UDB-406_2.fq.gz" ]]; then
-        error "Reverse reads file not found: $RAW_DATA_DIR/SAMPLE001_L01_UDB-406_2.fq.gz"
+    # Find FASTQ files
+    local fastq_files
+    fastq_files=($(find "$RAW_DATA_DIR" -name "*.fq.gz" -o -name "*.fastq.gz" 2>/dev/null))
+    
+    if [[ ${#fastq_files[@]} -eq 0 ]]; then
+        error "No FASTQ files found in: $RAW_DATA_DIR"
+        echo "Expected files with extensions: .fq.gz or .fastq.gz"
+        echo "Available files in directory:"
+        ls -la "$RAW_DATA_DIR" 2>/dev/null || echo "  Directory is empty or unreadable"
         exit 1
+    fi
+    
+    log "✓ Found ${#fastq_files[@]} FASTQ file(s)"
+    for file in "${fastq_files[@]}"; do
+        info "  $(basename "$file")"
+    done
+    
+    # Check disk space
+    local available_space
+    available_space=$(df "$OUTPUT_DIR" 2>/dev/null | awk 'NR==2 {print $4}' || echo "0")
+    if [[ "$available_space" -lt 1048576 ]]; then # Less than 1GB
+        warning "Low disk space available (less than 1GB). Quality control may fail."
     fi
     
     log "✓ Prerequisites check passed"
@@ -88,27 +282,45 @@ get_file_info() {
 # Run FastQC analysis
 run_fastqc() {
     local input_file=$1
-    local filename=$(basename "$input_file" .fq.gz)
+    local filename=$(basename "$input_file")
+    local basename_clean="${filename%.fq.gz}"
+    basename_clean="${basename_clean%.fastq.gz}"
     
     log "Starting FastQC analysis for $filename..."
     
     # Check if output already exists
-    if [[ -f "$OUTPUT_DIR/${filename}_fastqc.html" ]]; then
-        warning "FastQC output already exists for $filename. Skipping..."
+    if [[ -f "$OUTPUT_DIR/${basename_clean}_fastqc.html" ]] && [[ "$FORCE_OVERWRITE" != "true" ]]; then
+        warning "FastQC output already exists for $filename. Use --force to overwrite."
         return 0
     fi
     
+    # Dry run check
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo "Would run: fastqc --threads $THREADS --quiet --extract --outdir $OUTPUT_DIR $input_file"
+        return 0
+    fi
+    
+    # Validate input file
+    if [[ ! -f "$input_file" ]]; then
+        error "Input file not found: $input_file"
+        return 1
+    fi
+    
+    # Check file format (basic validation)
+    if ! file "$input_file" | grep -q "gzip"; then
+        warning "File may not be gzip compressed: $input_file"
+    fi
+    
     # Run FastQC with error handling
-    if fastqc \
-        --threads "$THREADS" \
-        --quiet \
-        --extract \
-        --outdir "$OUTPUT_DIR" \
-        "$input_file" 2>&1 | tee -a "$LOG_DIR/fastqc_${filename}.log"; then
+    info "Running FastQC with $THREADS threads on $filename"
+    local fastqc_cmd="fastqc --threads $THREADS --quiet --extract --outdir $OUTPUT_DIR $input_file"
+    
+    if eval "$fastqc_cmd" 2>&1 | tee -a "$LOG_DIR/fastqc_${basename_clean}.log"; then
         log "✓ FastQC analysis completed for $filename"
         return 0
     else
         error "FastQC analysis failed for $filename"
+        error "Check log file: $LOG_DIR/fastqc_${basename_clean}.log"
         return 1
     fi
 }
@@ -266,19 +478,60 @@ cleanup() {
 
 # Main execution
 main() {
+    # Parse command line arguments first
+    parse_arguments "$@"
+    
     log "Starting Quality Control Analysis for WGS Data"
     log "============================================="
     
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "DRY RUN MODE - No files will be processed"
+    fi
+    
     # Run all steps
+    validate_parameters
     check_prerequisites
     setup_directories
     get_file_info
     
-    # Run FastQC on both files
-    run_fastqc "$RAW_DATA_DIR/SAMPLE001_L01_UDB-406_1.fq.gz" || exit 1
-    run_fastqc "$RAW_DATA_DIR/SAMPLE001_L01_UDB-406_2.fq.gz" || exit 1
+    # Find all FASTQ files in input directory
+    local fastq_files
+    fastq_files=($(find "$RAW_DATA_DIR" -name "*.fq.gz" -o -name "*.fastq.gz" 2>/dev/null))
+    
+    if [[ ${#fastq_files[@]} -eq 0 ]]; then
+        error "No FASTQ files found to process"
+        exit 1
+    fi
+    
+    log "Processing ${#fastq_files[@]} FASTQ file(s)..."
+    
+    # Process each FASTQ file with progress indicator
+    local failed_files=0
+    for i in "${!fastq_files[@]}"; do
+        local file="${fastq_files[$i]}"
+        local current=$((i + 1))
+        show_progress "$current" "${#fastq_files[@]}" "Processing $(basename "$file")"
+        
+        if ! run_fastqc "$file"; then
+            ((failed_files++))
+            warning "Failed to process: $file"
+        fi
+    done
+    
+    echo "" # New line after progress indicator
+    
+    if [[ $failed_files -gt 0 ]]; then
+        warning "$failed_files file(s) failed to process"
+    fi
+    
+    # Skip analysis and summary for dry run
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log "Dry run completed. No analysis performed."
+        exit 0
+    fi
     
     # Analyze results
+    log "Analyzing FastQC results..."
     for fastqc_dir in "$OUTPUT_DIR"/*_fastqc; do
         if [[ -d "$fastqc_dir" ]]; then
             analyze_results "$fastqc_dir"
@@ -288,20 +541,28 @@ main() {
     # Generate summary
     generate_summary
     
-    # Open results
-    open_results
+    # Open results (only if not running in batch mode)
+    if [[ -t 1 ]]; then # Check if stdout is a terminal
+        open_results
+    else
+        log "Batch mode detected - skipping automatic file opening"
+    fi
     
     # Cleanup
     cleanup
     
-    log "Quality Control Analysis Completed Successfully!"
+    if [[ $failed_files -eq 0 ]]; then
+        log "✓ Quality Control Analysis Completed Successfully!"
+    else
+        warning "Quality Control Analysis completed with $failed_files error(s)"
+    fi
     log "=============================================="
     log "Review the HTML reports and summary file for detailed results"
     log "Summary file: $OUTPUT_DIR/quality_control_summary.txt"
 }
 
 # Handle interrupts gracefully
-trap 'error "Script interrupted by user"; exit 1' INT TERM
+trap 'error "Script interrupted by user"; cleanup; exit 1' INT TERM
 
 # Run main function
 main "$@"
