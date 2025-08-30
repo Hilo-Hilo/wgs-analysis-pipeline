@@ -1,13 +1,14 @@
-# WGS Analysis Environment Setup
+# WGS Analysis Environment Setup - 16GB Optimized
 
 ## Overview
-This document provides detailed instructions for setting up the conda environment for personal whole genome sequencing (WGS) analysis on macOS ARM64 (Apple Silicon) systems.
+This document provides detailed instructions for setting up the conda environment for whole genome sequencing (WGS) analysis specifically optimized for 16GB RAM systems.
 
-## System Requirements
-- **Operating System**: macOS (ARM64/Apple Silicon)
+## System Requirements (16GB Optimized)
+- **RAM**: 16GB (optimized configuration)
+- **Available Storage**: 400GB+ for complete WGS analysis
+- **CPU**: 4+ cores recommended
+- **Operating System**: Linux, macOS, or Windows with WSL
 - **Conda/Miniconda**: Version 4.0 or higher
-- **Available Storage**: Minimum 100GB for reference genome and analysis
-- **RAM**: Minimum 16GB recommended for WGS analysis
 
 ## Environment Configuration
 
@@ -26,21 +27,22 @@ conda create -n wgs_analysis python=3.11 r-base=4.3 -c conda-forge -y
 # Activate environment
 conda activate wgs_analysis
 
-# Install bioinformatics tools
-conda install -c bioconda fastp fastqc bwa samtools bcftools -y
+# Install bioinformatics tools (16GB optimized selection)
+conda install -c bioconda fastp fastqc bwa samtools bcftools ensembl-vep -y
 ```
 
 ## Installed Software Stack
 
-### Core Bioinformatics Tools
-| Tool | Version | Purpose | Channel |
-|------|---------|---------|---------|
-| **fastp** | 1.0.1 | High-performance FASTQ preprocessing | bioconda |
-| **fastqc** | 0.12.1 | Quality control for sequencing data | bioconda |
-| **BWA** | 0.7.19 | Burrows-Wheeler Aligner for mapping | bioconda |
-| **samtools** | 1.22.1 | SAM/BAM file manipulation | bioconda |
-| **bcftools** | 1.22 | VCF file manipulation and variant calling | bioconda |
-| **htslib** | 1.22.1 | High-throughput sequencing data formats | bioconda |
+### Core Bioinformatics Tools (16GB Optimized)
+| Tool | Version | Purpose | Channel | Memory Usage |
+|------|---------|---------|---------|--------------|
+| **fastp** | 1.0.1 | High-performance FASTQ preprocessing | bioconda | ~4GB |
+| **fastqc** | 0.12.1 | Quality control for sequencing data | bioconda | ~2GB |
+| **BWA** | 0.7.19 | Memory-efficient aligner for mapping | bioconda | ~10GB |
+| **samtools** | 1.22.1 | SAM/BAM file manipulation | bioconda | ~3GB |
+| **bcftools** | 1.22 | VCF file manipulation and variant calling | bioconda | ~3GB |
+| **ensembl-vep** | Latest | Variant effect prediction and annotation | bioconda | ~6GB |
+| **htslib** | 1.22.1 | High-throughput sequencing data formats | bioconda | N/A |
 
 ### Runtime Dependencies
 | Tool | Version | Purpose |
@@ -134,10 +136,11 @@ conda info --envs
 2. **Architecture Mismatch**: Ensure ARM64 compatible packages
 3. **Slow Installation**: Use `mamba` instead of conda for faster installs
 
-### Performance Optimization
-- **Memory**: Increase available RAM for large genome analysis
-- **Storage**: Use SSD for faster I/O operations
-- **CPU**: Utilize multi-threading options in tools
+### 16GB Performance Optimization
+- **Memory Management**: Sequential processing to avoid memory conflicts
+- **Thread Limits**: Conservative thread counts (4 max) to prevent memory overload
+- **Storage**: SSD recommended for 400GB+ analysis requirements
+- **Swap Space**: Not recommended - can cause performance issues
 
 ## Security Considerations
 - **Data Privacy**: Ensure personal genomic data is properly secured

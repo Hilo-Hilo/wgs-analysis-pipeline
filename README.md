@@ -1,121 +1,237 @@
 # Whole Genome Sequencing Analysis Pipeline
 
-A comprehensive pipeline for analyzing whole genome sequencing (WGS) data from raw FASTQ files to annotated variants. This repository contains scripts, documentation, and lessons learned from processing 30x coverage human WGS data.
+A local-optimized, comprehensive pipeline for analyzing whole genome sequencing (WGS) data from raw FASTQ files to annotated variants. **Designed for 16GB RAM systems** and users with minimal bioinformatics experience but comfortable with command-line tools.
 
-## 🔬 Overview
+## What Goes In, What Comes Out
 
-This pipeline processes paired-end Illumina WGS data through quality control, alignment, variant calling, and annotation stages. It supports both CHM13 T2T and GRCh38 reference genomes and includes optimizations for large-scale data processing.
+**INPUT**: Raw FASTQ files (paired-end, 50-100GB)  
+**OUTPUT**: Annotated variants ready for analysis (see [INPUT_OUTPUT_SPECIFICATION.md](INPUT_OUTPUT_SPECIFICATION.md))
+
+## Quick Navigation
+
+| I want to... | Go to... |
+|---------------|----------|
+| **See exactly what files are created** | [INPUT_OUTPUT_SPECIFICATION.md](INPUT_OUTPUT_SPECIFICATION.md) |
+| **Complete 16GB system setup guide** | [16GB_SYSTEM_GUIDE.md](16GB_SYSTEM_GUIDE.md) |
+| **Get started quickly** | [GETTING_STARTED.md](GETTING_STARTED.md) |
+| **Check if my system is ready** | `./scripts/check_requirements.sh --min-ram 16 --min-disk 400` |
+| **Use 16GB RAM optimized settings** | Built-in (config/default.conf) |
+| **Fix problems** | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
+
+**First time?** Run this test:
+```bash
+./scripts/check_requirements.sh --min-ram 16 --min-disk 400
+```
+
+## Overview
+
+This pipeline processes paired-end Illumina WGS data through quality control, alignment, variant calling, and annotation stages. **Optimized for local machines with 16GB RAM**. Supports GRCh38 reference genome with memory-efficient processing.
 
 ### Key Features
-- Complete end-to-end WGS analysis workflow
-- Support for CHM13 T2T v2.0 and GRCh38 references
-- Optimized for 30x coverage whole genome data
-- Parallel processing capabilities
-- Comprehensive variant annotation with VEP
-- Personal genomics analysis tools
-- Cloud and local deployment options
+- **16GB RAM optimized** - Runs efficiently on local workstations
+- **Memory-aware processing** - Sequential steps prevent system crashes
+- **Complete workflow** - Raw FASTQ to annotated variants
+- **GRCh38 reference** - Standard human genome analysis
+- **Automatic cleanup** - Manages disk space during analysis
+- **Clear outputs** - Exactly specified file structure
+- **Progress tracking** - Real-time status updates
 
-## 📊 Pipeline Stages
+## Pipeline Stages
 
-1. **Quality Control**
-   - FastQC for raw read assessment
-   - Fastp for adapter trimming and quality filtering
-   - MultiQC for aggregated reports
+1. **Quality Control** (10-30 minutes, 2GB peak RAM)
+   - FastQC analysis of raw reads
+   - Quality metrics and contamination detection
+   - HTML reports for visual inspection
 
-2. **Alignment**
-   - BWA-MEM for GRCh38 (standard clinical reference)
-   - BWA for CHM13 T2T (complete telomere-to-telomere assembly)
-   - SAMtools for BAM processing
+2. **Read Cleaning** (30-90 minutes, 4GB peak RAM)
+   - Adapter trimming with fastp
+   - Quality filtering and read length filtering
+   - Statistics on removed sequences
 
-3. **Variant Calling**
-   - BCFtools for traditional variant calling
-   - DeepVariant for deep learning-based calling
-   - Joint calling and GVCF generation
+3. **Alignment** (4-8 hours, 12GB peak RAM)
+   - BWA-MEM mapping to GRCh38 reference
+   - SAMtools sorting and indexing
+   - Alignment statistics and coverage metrics
 
-4. **Annotation**
-   - VEP (Variant Effect Predictor) v110
-   - gnomAD v4.0 population frequencies
-   - ClinVar clinical significance
-   - COSMIC cancer variants
+4. **Variant Calling** (2-4 hours, 6GB peak RAM)
+   - BCFtools variant detection
+   - Quality filtering and normalization
+   - VCF indexing and statistics
 
-5. **Analysis**
+5. **Annotation** (1-2 hours, 8GB peak RAM)
+   - VEP variant annotation with gnomAD and ClinVar
    - High-impact variant identification
-   - Pharmacogenomics analysis
-   - Ancestry and trait prediction
-   - Clinical interpretation templates
+   - Clinical significance assessment
 
-## 🚀 Quick Start
+## Quick Start for 16GB Systems
 
-### Prerequisites
+### 1. Check System Requirements
+```bash
+# Verify your system meets 16GB requirements
+./scripts/check_requirements.sh --min-ram 16 --min-disk 400
+```
 
+### 2. Set Up Environment
 ```bash
 # Create conda environment
-conda create -n wgs_analysis python=3.9
+conda create -n wgs_analysis -c bioconda -c conda-forge \
+    python=3.9 fastqc fastp bwa samtools bcftools vep
+
+# Activate environment
 conda activate wgs_analysis
-
-# Install core tools
-conda install -c bioconda bwa samtools bcftools
-conda install -c bioconda fastp fastqc multiqc
 ```
 
-### Basic Usage
-
+### 3. Use 16GB Optimized Configuration
 ```bash
-# 1. Quality control
-./scripts/quality_control.sh
+# Copy optimized configuration
+cp config/local_16gb.conf config/my_analysis.conf
 
-# 2. Alignment to reference
-./scripts/chm13_mapping.sh  # For CHM13
-# OR
-./scripts/grch38_mapping.sh  # For GRCh38
-
-# 3. Variant calling
-./scripts/variant_calling.sh
-
-# 4. Annotation
-./scripts/vep_annotation.sh
+# Or load directly in scripts:
+source config/local_16gb.conf
 ```
 
-## 💡 Important Discoveries
-
-### BWA-MEM2 Memory Requirements
-**Critical Finding**: BWA-MEM2 requires **128GB RAM** for GRCh38 indexing, not the 28GB stated in documentation.
-
+### 4. Run with Your Data
 ```bash
-# Will fail with less than 128GB RAM
-bwa-mem2 index GRCh38_latest_genomic.fna
+# 1. Place your FASTQ files
+mkdir -p data/raw
+cp your_sample_R1.fastq.gz data/raw/
+cp your_sample_R2.fastq.gz data/raw/
 
-# Solution: Use high-memory cloud instance or original BWA
+# 2. Run complete pipeline (sequential, memory-safe)
+./scripts/quality_control.sh --threads 4
+./scripts/data_cleaning.sh --threads 4
+./scripts/alignment.sh --threads 4
+./scripts/variant_calling.sh --threads 2
+./scripts/vep_annotation.sh --threads 2
+
+# Total time: 8-15 hours
+# Total storage needed: 300-400GB
 ```
 
-See [BWA_MEM2_ROOT_CAUSE_ANALYSIS.md](documentation/BWA_MEM2_ROOT_CAUSE_ANALYSIS.md) for details.
+## 16GB RAM Optimization Notes
 
-### Performance Metrics
-- **Input**: 131GB paired-end FASTQ files
-- **Processing Time**: ~24 hours on 8 cores
-- **Output**: ~5 million variants
-- **Mapping Rate**: ~88.6% (typical for WGS)
-- **Storage Required**: ~400GB total
+### Memory Management Strategy
+**Key Finding**: Original BWA works efficiently with 16GB RAM, but BWA-MEM2 requires 128GB+ for indexing.
 
-## 📁 Repository Structure
+**Our Solution**: Use standard BWA with optimized parameters
+```bash
+# Memory-efficient alignment (used automatically)
+bwa mem -t 4 -M reference.fna reads_R1.fq reads_R2.fq
+```
+
+### Expected Performance (16GB system)
+- **Input**: 50-100GB paired-end FASTQ files
+- **Processing Time**: 8-15 hours on 4-8 cores
+- **Peak Memory**: 12GB during alignment
+- **Output**: 4-5 million variants (filtered)
+- **Storage Required**: 300-400GB total
+
+### Critical Success Factors
+- **Sequential processing** prevents memory conflicts
+- **Automatic cleanup** manages disk space
+- **Progress monitoring** prevents system hangs
+- **Optimized parameters** balance speed and memory
+
+## Features for 16GB Systems
+
+### Memory-Optimized Scripts
+- **`config/local_16gb.conf`** - Pre-configured settings for 16GB RAM
+- **`check_requirements.sh`** - Validates memory and disk requirements
+- **Sequential processing** - Prevents memory conflicts between steps
+
+### Smart Resource Management
+- **Memory monitoring** - Stops processes if RAM usage gets dangerous
+- **Automatic cleanup** - Removes intermediate files to save space
+- **Progress tracking** - Shows current step and estimated completion
+- **Error recovery** - Can resume from failed steps
+
+### Input/Output Clarity
+- **[INPUT_OUTPUT_SPECIFICATION.md](INPUT_OUTPUT_SPECIFICATION.md)** - Exact file list and sizes
+- **Predictable structure** - All outputs in clearly organized directories
+- **Size estimates** - Know storage requirements before starting
+
+### Documentation for Local Use
+- **[GETTING_STARTED.md](GETTING_STARTED.md)** - Complete setup guide
+- **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - Local system problems and solutions
+
+## Repository Structure
 
 ```
 wgs-analysis-pipeline/
-├── scripts/              # Pipeline scripts
-│   ├── alignment/       # Mapping scripts
-│   ├── variant_calling/ # Variant calling scripts
-│   ├── annotation/      # VEP annotation scripts
-│   └── quality_control/ # QC scripts
-├── analysis/            # Analysis tools
-│   ├── pharmacogenomics.py
-│   ├── trait_analysis.py
-│   └── variant_impact.py
-├── documentation/       # Detailed guides
-│   ├── environment_setup.md
-│   ├── cloud_infrastructure_guide.md
-│   └── complete_analysis_workflow.md
-├── templates/          # Example configurations
-└── examples/          # Sample data and outputs
+├── INPUT_OUTPUT_SPECIFICATION.md  # WHAT FILES ARE CREATED
+├── GETTING_STARTED.md              # Setup guide for beginners
+├── TROUBLESHOOTING.md              # Local system problems
+├── scripts/                        # Memory-optimized pipeline scripts
+│   ├── check_requirements.sh       # 16GB RAM validation
+│   ├── quality_control.sh          # FastQC analysis
+│   ├── data_cleaning.sh            # Read trimming
+│   ├── alignment.sh                # BWA alignment
+│   └── load_config.sh              # Configuration management
+├── config/                         # Memory configurations
+│   ├── default.conf                # Standard settings
+│   ├── local_16gb.conf             # 16GB RAM optimized
+│   └── example.conf                # Template
+├── analysis/                       # Post-processing tools
+├── documentation/                  # Advanced guides
+└── templates/                      # Configuration examples
+```
+
+## 🛠️ Script Usage Examples
+
+All scripts now include comprehensive help documentation. Use `--help` with any script:
+
+### Quality Control
+```bash
+# Basic usage
+./scripts/quality_control.sh
+
+# With custom options
+./scripts/quality_control.sh --input-dir /path/to/fastq --threads 16 --verbose
+
+# Dry run to see what will be processed
+./scripts/quality_control.sh --dry-run
+
+# Get help
+./scripts/quality_control.sh --help
+```
+
+### System Validation
+```bash
+# Check if your system is ready for analysis
+./scripts/check_requirements.sh
+
+# Check with custom memory requirements
+./scripts/check_requirements.sh --min-ram 32 --min-disk 1000
+
+# Verbose output showing all checks
+./scripts/check_requirements.sh --verbose
+```
+
+### Sample Data Management
+```bash
+# Download small test dataset
+./scripts/download_sample_data.sh --type small
+
+# Download medium dataset for comprehensive testing
+./scripts/download_sample_data.sh --type medium
+
+# List available datasets
+./scripts/download_sample_data.sh --list
+```
+
+### Configuration Management
+```bash
+# Show current configuration
+./scripts/load_config.sh show
+
+# Create new configuration from template
+./scripts/load_config.sh create my_analysis
+
+# List available configurations
+./scripts/load_config.sh list
+
+# Validate configuration
+./scripts/load_config.sh validate config/my_analysis.conf
 ```
 
 ## 🧬 Analysis Tools
@@ -127,18 +243,11 @@ Analyze genetic variants affecting drug metabolism:
 python analysis/pharmacogenomics.py --vcf input.vcf.gz
 ```
 
-### Trait Prediction
-Predict genetic traits and ancestry:
+### Comprehensive Analysis
+Run multiple analysis modules:
 
 ```python
-python analysis/trait_analysis.py --vcf input.vcf.gz
-```
-
-### High-Impact Variant Analysis
-Identify clinically significant variants:
-
-```python
-python analysis/variant_impact.py --vcf input.vcf.gz --impact HIGH
+python analysis/comprehensive_analysis.py --vcf input.vcf.gz
 ```
 
 ## ☁️ Cloud Deployment
@@ -170,20 +279,37 @@ See [cloud_infrastructure_guide.md](documentation/cloud_infrastructure_guide.md)
 
 ## 🔧 Troubleshooting
 
-### Common Issues
+**Having issues?** → Check [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for comprehensive solutions
 
-1. **Out of Memory During Alignment**
-   - Solution: Use original BWA instead of BWA-MEM2
-   - Alternative: Use cloud instance with 128GB+ RAM
+### Quick Fixes for Common Issues
 
-2. **Low Mapping Rate (<80%)**
-   - Check read quality with FastQC
-   - Verify correct reference genome version
-   - Consider additional quality filtering
+1. **"Command not found" errors**
+   ```bash
+   conda activate wgs_analysis  # Activate environment first
+   ./scripts/check_requirements.sh  # Verify installation
+   ```
 
-3. **VEP Installation Issues**
-   - Use Docker container: `ensemblorg/ensembl-vep`
-   - Or use web API for small variant sets
+2. **Out of memory errors**
+   ```bash
+   ./scripts/quality_control.sh --threads 4  # Reduce threads
+   ./scripts/check_requirements.sh --min-ram 16  # Check requirements
+   ```
+
+3. **No FASTQ files found**
+   ```bash
+   # Check file extensions (.fq.gz or .fastq.gz)
+   ls -la data/raw/
+   # Or specify custom directory:
+   ./scripts/quality_control.sh --input-dir /path/to/your/files
+   ```
+
+4. **Low mapping rate (<80%)**
+   ```bash
+   ./scripts/quality_control.sh  # Check read quality first
+   # Verify reference genome matches your sample species
+   ```
+
+**For detailed solutions**, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
 
 ## 📊 Expected Results
 
@@ -234,7 +360,7 @@ This pipeline is for research and educational purposes. For clinical application
 
 ## 🙏 Acknowledgments
 
-- CHM13 T2T Consortium for the complete human reference
+- Genome Reference Consortium for the GRCh38 human reference
 - gnomAD team for population frequency data
 - Ensembl VEP team for annotation tools
 - The open-source bioinformatics community
