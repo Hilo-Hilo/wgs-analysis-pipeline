@@ -1,0 +1,116 @@
+version: '3.8'
+
+services:
+  wgs-pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_DATE: ${BUILD_DATE:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}
+        BUILD_VERSION: ${BUILD_VERSION:-latest}
+        VCS_REF: ${VCS_REF:-$(git rev-parse --short HEAD)}
+    image: wgs-pipeline:latest
+    container_name: wgs-analysis
+    
+    # Resource limits (16GB optimized)
+    deploy:
+      resources:
+        limits:
+          memory: 16G
+          cpus: '4'
+        reservations:
+          memory: 8G
+          cpus: '2'
+    
+    # Environment variables
+    environment:
+      - WGS_PIPELINE_HOME=/opt/wgs-pipeline
+      - PYTHONUNBUFFERED=1
+    
+    # Volume mounts
+    volumes:
+      # Mount data directories
+      - ./data:/opt/wgs-pipeline/data
+      - ./results:/opt/wgs-pipeline/results
+      - ./logs:/opt/wgs-pipeline/logs
+      
+      # Mount reference data (if available locally)
+      - ${REFERENCE_DIR:-./reference}:/opt/wgs-pipeline/data/reference
+      
+      # Mount custom configs (optional)
+      - ${CONFIG_DIR:-./config}:/opt/wgs-pipeline/config
+    
+    # Working directory
+    working_dir: /opt/wgs-pipeline
+    
+    # Keep container running
+    tty: true
+    stdin_open: true
+    
+    # Custom command (optional)
+    command: ${DOCKER_CMD:-/bin/bash}
+    
+    # Networking
+    network_mode: "host"
+    
+    # Restart policy
+    restart: unless-stopped
+
+  # Optional: Jupyter notebook service for interactive analysis
+  jupyter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wgs-pipeline:latest
+    container_name: wgs-jupyter
+    
+    depends_on:
+      - wgs-pipeline
+    
+    # Jupyter-specific settings
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+      - JUPYTER_TOKEN=${JUPYTER_TOKEN:-wgs-analysis}
+    
+    # Ports for Jupyter
+    ports:
+      - "${JUPYTER_PORT:-8888}:8888"
+    
+    # Volume mounts (same as main service)
+    volumes:
+      - ./data:/opt/wgs-pipeline/data
+      - ./results:/opt/wgs-pipeline/results
+      - ./notebooks:/opt/wgs-pipeline/notebooks
+    
+    # Jupyter startup command
+    command: >
+      bash -c "
+        pip install jupyterlab &&
+        mkdir -p notebooks &&
+        jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root
+      "
+    
+    # Only start if explicitly requested
+    profiles:
+      - jupyter
+
+# Networks (optional)
+networks:
+  default:
+    name: wgs-pipeline-network
+
+# Volumes for persistent data (optional)
+volumes:
+  reference_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${REFERENCE_DIR:-./reference}
+  
+  results_data:
+    driver: local
+    driver_opts:
+      type: none  
+      o: bind
+      device: ./results
