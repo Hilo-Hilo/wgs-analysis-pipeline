@@ -135,7 +135,7 @@ validate_fastq_format() {
         
         case $pos_in_read in
             0)  # Header line
-                if [[ ! "$line" =~ ^@.+ ]]; then
+                if [[ ! "$line" =~ ^@.+$ ]]; then
                     ((format_errors++))
                     if [[ $format_errors -le 3 ]]; then
                         log_error "Invalid header line $((line_num + 1)): $line"
@@ -298,9 +298,9 @@ validate_reference_genome() {
     local seq_length=0
     
     while IFS= read -r line && [[ $line_count -lt 1000 ]]; do
-        if [[ "$line" =~ ^>.* ]]; then
+        if [[ "$line" =~ ^'>'.*$ ]]; then
             ((header_count++))
-        elif [[ "$line" =~ ^[ATCGN]+ ]]; then
+        elif [[ "$line" =~ ^[ATCGN]+$ ]]; then
             seq_length=$((seq_length + ${#line}))
         elif [[ -n "$line" ]]; then
             log_error "Invalid characters in reference sequence"
