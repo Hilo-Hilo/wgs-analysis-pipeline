@@ -95,7 +95,8 @@ list_profiles() {
         return 1
     fi
     
-    local profiles=($(find "$PROFILES_DIR" -name "*.conf" -exec basename {} .conf \; | sort))
+    local profiles
+    mapfile -t profiles < <(find "$PROFILES_DIR" -name "*.conf" -exec basename {} .conf \; | sort)
     
     if [[ ${#profiles[@]} -eq 0 ]]; then
         warning "No profiles found in $PROFILES_DIR"
@@ -112,8 +113,10 @@ list_profiles() {
         
         if [[ -f "$profile_file" ]]; then
             description=$(grep "^PROFILE_DESCRIPTION=" "$profile_file" 2>/dev/null | cut -d'"' -f2 || echo "No description")
-            local max_mem=$(grep "^MAX_MEMORY_GB=" "$profile_file" 2>/dev/null | cut -d'=' -f2 || echo "?")
-            local max_threads=$(grep "^MAX_THREADS=" "$profile_file" 2>/dev/null | cut -d'=' -f2 || echo "?")
+            local max_mem
+            local max_threads
+            max_mem=$(grep "^MAX_MEMORY_GB=" "$profile_file" 2>/dev/null | cut -d'=' -f2 || echo "?")
+            max_threads=$(grep "^MAX_THREADS=" "$profile_file" 2>/dev/null | cut -d'=' -f2 || echo "?")
             resources="${max_mem}GB, ${max_threads} threads"
         fi
         
@@ -171,7 +174,8 @@ show_profile() {
     for setting_info in "${settings[@]}"; do
         local key="${setting_info%:*}"
         local label="${setting_info#*:}"
-        local value=$(grep "^${key}=" "$profile_file" 2>/dev/null | cut -d'=' -f2- | sed 's/"//g' || echo "not set")
+        local value
+        value=$(grep "^${key}=" "$profile_file" 2>/dev/null | cut -d'=' -f2- | sed 's/"//g' || echo "not set")
         printf "%-25s %s\n" "$label" "$value"
     done
     
@@ -258,7 +262,8 @@ validate_profile() {
     )
     
     for setting in "${numeric_settings[@]}"; do
-        local value=$(grep "^${setting}=" "$profile_file" 2>/dev/null | cut -d'=' -f2)
+        local value
+        value=$(grep "^${setting}=" "$profile_file" 2>/dev/null | cut -d'=' -f2)
         if [[ -n "$value" && ! "$value" =~ ^[0-9]+$ ]]; then
             [[ "$quiet" != "--quiet" ]] && error "Invalid numeric value for $setting: $value"
             ((validation_errors++))
@@ -266,8 +271,10 @@ validate_profile() {
     done
     
     # Check logical constraints
-    local max_threads=$(grep "^MAX_THREADS=" "$profile_file" 2>/dev/null | cut -d'=' -f2 || echo "0")
-    local bwa_threads=$(grep "^BWA_THREADS=" "$profile_file" 2>/dev/null | cut -d'=' -f2 || echo "0")
+    local max_threads
+    local bwa_threads
+    max_threads=$(grep "^MAX_THREADS=" "$profile_file" 2>/dev/null | cut -d'=' -f2 || echo "0")
+    bwa_threads=$(grep "^BWA_THREADS=" "$profile_file" 2>/dev/null | cut -d'=' -f2 || echo "0")
     
     if [[ "$bwa_threads" -gt "$max_threads" ]]; then
         [[ "$quiet" != "--quiet" ]] && warning "BWA_THREADS ($bwa_threads) exceeds MAX_THREADS ($max_threads)"
@@ -324,8 +331,10 @@ compare_profiles() {
     printf "%s\n" "$(printf '=%.0s' {1..65})"
     
     for setting in "${settings[@]}"; do
-        local value1=$(grep "^${setting}=" "$profile1_file" 2>/dev/null | cut -d'=' -f2- | sed 's/"//g' || echo "unset")
-        local value2=$(grep "^${setting}=" "$profile2_file" 2>/dev/null | cut -d'=' -f2- | sed 's/"//g' || echo "unset")
+        local value1
+        local value2
+        value1=$(grep "^${setting}=" "$profile1_file" 2>/dev/null | cut -d'=' -f2- | sed 's/"//g' || echo "unset")
+        value2=$(grep "^${setting}=" "$profile2_file" 2>/dev/null | cut -d'=' -f2- | sed 's/"//g' || echo "unset")
         
         local diff=""
         if [[ "$value1" != "$value2" ]]; then
