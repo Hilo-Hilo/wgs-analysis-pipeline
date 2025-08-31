@@ -123,7 +123,7 @@ jobs:
     
     - name: Upload test artifacts
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: test-outputs-${{ matrix.test-type }}
         path: |
@@ -269,7 +269,7 @@ jobs:
         echo "benchmark_date: $(date -u)" >> benchmark_results.txt
     
     - name: Upload benchmark results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: benchmark-results
         path: |

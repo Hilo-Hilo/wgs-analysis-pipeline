@@ -53,16 +53,17 @@ RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -
 # Add conda to PATH
 ENV PATH="/opt/miniconda/bin:$PATH"
 
-# Create conda environment with bioinformatics tools
-RUN conda create -n wgs_analysis python=3.9 -y && \
+# Accept conda terms of service and create conda environment with bioinformatics tools
+RUN conda config --set channel_priority strict && \
+    conda config --set always_yes true && \
+    conda create -n wgs_analysis python=3.9 && \
     conda install -n wgs_analysis -c bioconda -c conda-forge \
     fastqc=0.12.1 \
     fastp=0.23.4 \
     bwa=0.7.17 \
     samtools=1.17 \
     bcftools=1.17 \
-    ensembl-vep=110.1 \
-    -y && \
+    ensembl-vep=110.1 && \
     conda clean -ya
 
 # Activate environment by default
