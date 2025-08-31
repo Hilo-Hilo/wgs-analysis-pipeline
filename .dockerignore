@@ -1,0 +1,66 @@
+# Git files
+.git
+.gitignore
+
+# Development files
+.claude
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+
+# Log files
+*.log
+logs/*.log
+
+# Large data files (mount these as volumes instead)
+data/raw/*.fastq.gz
+data/raw/*.fq.gz
+data/processed/*.fastq.gz
+data/processed/*.fq.gz
+results/alignment/*.bam
+results/alignment/*.sam
+results/variants/*.vcf.gz
+
+# Reference genomes (mount as volumes)
+data/reference/*/
+
+# Test outputs
+tests/tmp/
+tests/output/
+
+# IDE files
+.vscode/
+.idea/
+*.code-workspace
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+pip-log.txt
+
+# Documentation build files
+docs/_build/
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Node.js (if any)
+node_modules/
+npm-debug.log
+
+# Backup files
+*.bak
+*.backup
+*~

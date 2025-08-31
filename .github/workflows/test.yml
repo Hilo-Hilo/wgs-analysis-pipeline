@@ -1,0 +1,278 @@
+name: WGS Pipeline Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run tests weekly on Sundays at 2 AM UTC
+    - cron: '0 2 * * 0'
+
+env:
+  PYTHON_VERSION: '3.9'
+  CONDA_ENV: 'wgs_analysis'
+
+jobs:
+  # Lint and validate shell scripts
+  shellcheck:
+    name: Shell Script Validation
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install ShellCheck
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y shellcheck
+    
+    - name: Run ShellCheck on scripts
+      run: |
+        echo "🔍 Checking shell scripts..."
+        find scripts/ -name "*.sh" -type f | while read -r script; do
+          echo "Checking: $script"
+          shellcheck "$script" || exit 1
+        done
+        
+        # Check additional shell scripts
+        for script in docker-helper.sh tests/run_tests.sh; do
+          if [[ -f "$script" ]]; then
+            echo "Checking: $script"
+            shellcheck "$script" || exit 1
+          fi
+        done
+        
+        echo "✅ All shell scripts passed validation!"
+
+  # Unit and integration tests
+  test:
+    name: Pipeline Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        test-type: [unit, integration, quick]
+        
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Setup Miniconda
+      uses: conda-incubator/setup-miniconda@v3
+      with:
+        auto-update-conda: true
+        python-version: ${{ env.PYTHON_VERSION }}
+        channels: bioconda,conda-forge,defaults
+        channel-priority: strict
+    
+    - name: Install bioinformatics tools
+      shell: bash -el {0}
+      run: |
+        conda create -n ${{ env.CONDA_ENV }} python=${{ env.PYTHON_VERSION }}
+        conda activate ${{ env.CONDA_ENV }}
+        
+        # Install core tools with specific versions for reproducibility
+        conda install -c bioconda -c conda-forge \
+          fastqc=0.12.1 \
+          fastp=0.23.4 \
+          bwa=0.7.17 \
+          samtools=1.17 \
+          bcftools=1.17 \
+          -y
+        
+        # Verify installations
+        fastqc --version || true
+        fastp --version || true
+        bwa 2>&1 | head -3 || true
+        samtools --version || true
+        bcftools --version || true
+    
+    - name: Generate test data
+      shell: bash -el {0}
+      run: |
+        conda activate ${{ env.CONDA_ENV }}
+        python3 tests/generate_sample_data.py --create-all
+        ls -la tests/sample_data/*/
+    
+    - name: Run tests
+      shell: bash -el {0}
+      run: |
+        conda activate ${{ env.CONDA_ENV }}
+        
+        # Set test parameters based on matrix
+        case "${{ matrix.test-type }}" in
+          "unit")
+            echo "🧪 Running unit tests..."
+            tests/run_tests.sh --unit-only --verbose
+            ;;
+          "integration")
+            echo "🔗 Running integration tests..."
+            tests/run_tests.sh --integration-only --verbose --no-cleanup
+            ;;
+          "quick")
+            echo "⚡ Running quick tests..."
+            tests/run_tests.sh --quick --verbose
+            ;;
+        esac
+    
+    - name: Upload test artifacts
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-outputs-${{ matrix.test-type }}
+        path: |
+          /tmp/wgs_pipeline_test_*/
+          tests/sample_data/
+        retention-days: 7
+
+  # Docker build and test
+  docker:
+    name: Docker Build & Test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Build Docker image
+      run: |
+        echo "🐳 Building Docker image..."
+        docker build \
+          --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+          --build-arg BUILD_VERSION=${{ github.sha }} \
+          --build-arg VCS_REF=${{ github.sha }} \
+          -t wgs-pipeline:test .
+    
+    - name: Test Docker image
+      run: |
+        echo "🧪 Testing Docker image..."
+        
+        # Test that the image runs
+        docker run --rm wgs-pipeline:test check_requirements.sh --help
+        
+        # Test that tools are available
+        docker run --rm wgs-pipeline:test bash -c "
+          source activate wgs_analysis &&
+          fastqc --version &&
+          fastp --version &&
+          bwa 2>&1 | head -1 &&
+          samtools --version | head -1 &&
+          bcftools --version | head -1
+        "
+        
+        echo "✅ Docker image tests passed!"
+
+  # Documentation and README validation  
+  docs:
+    name: Documentation Check
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Check documentation files
+      run: |
+        echo "📚 Checking documentation..."
+        
+        # Check that required documentation exists
+        required_docs=(
+          "README.md"
+          "GETTING_STARTED.md"
+          "16GB_SYSTEM_GUIDE.md"
+          "TROUBLESHOOTING.md"
+          "INPUT_OUTPUT_SPECIFICATION.md"
+        )
+        
+        for doc in "${required_docs[@]}"; do
+          if [[ -f "$doc" ]]; then
+            echo "✅ Found: $doc"
+          else
+            echo "❌ Missing: $doc"
+            exit 1
+          fi
+        done
+        
+        # Check for broken links (basic)
+        grep -r "\[.*\](.*\.md)" *.md | while read -r line; do
+          file=$(echo "$line" | cut -d: -f1)
+          link=$(echo "$line" | grep -o '\[.*\](.*\.md)' | sed 's/.*](\(.*\))/\1/')
+          
+          if [[ -f "$link" ]]; then
+            echo "✅ Valid link in $file: $link"
+          else
+            echo "❌ Broken link in $file: $link"
+            # Don't exit here, just report
+          fi
+        done
+        
+        echo "📖 Documentation check completed!"
+
+  # Performance benchmark (optional, only on main branch)
+  benchmark:
+    name: Performance Benchmark
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    needs: [test]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Miniconda
+      uses: conda-incubator/setup-miniconda@v3
+      with:
+        auto-update-conda: true
+        python-version: ${{ env.PYTHON_VERSION }}
+        channels: bioconda,conda-forge,defaults
+    
+    - name: Install tools
+      shell: bash -el {0}
+      run: |
+        conda create -n ${{ env.CONDA_ENV }} python=${{ env.PYTHON_VERSION }}
+        conda activate ${{ env.CONDA_ENV }}
+        conda install -c bioconda -c conda-forge fastqc fastp -y
+    
+    - name: Run performance benchmark
+      shell: bash -el {0}
+      run: |
+        conda activate ${{ env.CONDA_ENV }}
+        
+        echo "⚡ Running performance benchmark..."
+        python3 tests/generate_sample_data.py --num-reads 10000 --output-dir benchmark_data
+        
+        # Time the quality control step
+        time_start=$(date +%s)
+        scripts/quality_control.sh \
+          --input-dir benchmark_data \
+          --output-dir benchmark_results \
+          --threads 2 \
+          --sample-id benchmark
+        time_end=$(date +%s)
+        
+        duration=$((time_end - time_start))
+        echo "📊 QC completed in ${duration} seconds for 10,000 reads"
+        
+        # Store benchmark result
+        echo "benchmark_duration_seconds: $duration" > benchmark_results.txt
+        echo "benchmark_reads: 10000" >> benchmark_results.txt
+        echo "benchmark_date: $(date -u)" >> benchmark_results.txt
+    
+    - name: Upload benchmark results
+      uses: actions/upload-artifact@v3
+      with:
+        name: benchmark-results
+        path: |
+          benchmark_results.txt
+          benchmark_results/
+        retention-days: 30

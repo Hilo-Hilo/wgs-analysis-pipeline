@@ -18,9 +18,15 @@ DEFAULT_CONFIG_FILE="config/default.conf"
 load_config() {
     local config_file="$1"
     
-    # Use default config if none specified
+    # Check for active profile first
     if [[ -z "$config_file" ]]; then
-        config_file="$DEFAULT_CONFIG_FILE"
+        if [[ -f "config/active.conf" ]]; then
+            config_file="config/active.conf"
+            local profile_name=$(cat "config/current_profile.conf" 2>/dev/null || echo "unknown")
+            echo "Using active profile: $profile_name" >&2
+        else
+            config_file="$DEFAULT_CONFIG_FILE"
+        fi
     fi
     
     # Check if config file exists
@@ -28,6 +34,9 @@ load_config() {
         echo "ERROR: Configuration file not found: $config_file" >&2
         echo "Available configurations:" >&2
         ls -la config/*.conf 2>/dev/null >&2 || echo "No configuration files found in config/" >&2
+        echo "Available profiles:" >&2
+        ls -la config/profiles/*.conf 2>/dev/null >&2 || echo "No profiles found in config/profiles/" >&2
+        echo "Use: scripts/manage_profiles.sh list" >&2
         return 1
     fi
     
@@ -336,6 +345,12 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
                 exit 1
             fi
             ;;
+        "profiles")
+            echo "Profile Management:"
+            echo "Use: scripts/manage_profiles.sh list"
+            echo "     scripts/manage_profiles.sh show <profile>"
+            echo "     scripts/manage_profiles.sh set <profile>"
+            ;;
         "help"|"-h"|"--help"|"")
             cat << EOF
 Configuration Loader Utility
@@ -349,6 +364,7 @@ COMMANDS:
     list                   List available configuration files
     create <NAME>          Create new configuration from template
     validate [CONFIG_FILE] Validate configuration syntax and values
+    profiles               Show profile management commands
     help                   Show this help message
 
 EXAMPLES:
@@ -367,10 +383,16 @@ EXAMPLES:
     # Validate configuration
     scripts/load_config.sh validate config/my_analysis.conf
 
+    # Profile management
+    scripts/manage_profiles.sh list
+    scripts/manage_profiles.sh set workstation
+
 FILES:
-    config/default.conf    Default pipeline settings
-    config/example.conf    Template for custom configurations
-    config/*.conf          User-specific configurations
+    config/default.conf         Default pipeline settings
+    config/example.conf         Template for custom configurations
+    config/*.conf              User-specific configurations
+    config/profiles/*.conf     System-optimized profiles
+    config/active.conf         Currently active profile (auto-generated)
 
 EOF
             ;;
