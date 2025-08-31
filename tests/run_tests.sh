@@ -125,7 +125,7 @@ generate_test_data() {
     local output_r2="$TEMP_TEST_DIR/data/raw/test_sample_R2.fastq.gz"
     
     # Generate 1000 paired-end reads (tiny dataset for testing)
-    python3 - << 'EOF'
+    python3 - << EOF
 import gzip
 import random
 
@@ -137,12 +137,12 @@ def generate_read(read_id, length=100):
     return f"@read_{read_id}\n{sequence}\n+\n{quality}\n"
 
 # Generate R1 file
-with gzip.open('/tmp/wgs_pipeline_test_$$/data/raw/test_sample_R1.fastq.gz', 'wt') as f1:
+with gzip.open('$output_r1', 'wt') as f1:
     for i in range(1000):
         f1.write(generate_read(f"{i}_1"))
 
 # Generate R2 file  
-with gzip.open('/tmp/wgs_pipeline_test_$$/data/raw/test_sample_R2.fastq.gz', 'wt') as f2:
+with gzip.open('$output_r2', 'wt') as f2:
     for i in range(1000):
         f2.write(generate_read(f"{i}_2"))
 EOF
@@ -181,7 +181,8 @@ run_unit_tests() {
     info "Testing help messages..."
     local help_tests_passed=0
     for script in "$ROOT_DIR/scripts"/*.sh; do
-        local script_name=$(basename "$script")
+        local script_name
+        script_name=$(basename "$script")
         if [[ "$script_name" == "load_config.sh" ]]; then
             continue  # Skip utility script
         fi
@@ -207,7 +208,8 @@ run_unit_tests() {
     local dry_run_passed=0
     for script in "$ROOT_DIR/scripts"/{quality_control,data_cleaning,alignment,variant_calling}.sh; do
         if [[ -f "$script" ]]; then
-            local script_name=$(basename "$script")
+            local script_name
+        script_name=$(basename "$script")
             if timeout 30 "$script" --dry-run > /dev/null 2>&1; then
                 info "  ✓ $script_name dry run works"
                 ((dry_run_passed++))
