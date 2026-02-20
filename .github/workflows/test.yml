@@ -79,6 +79,7 @@ jobs:
           activate-environment: ${{ env.CONDA_ENV }}
           environment-file: .github/conda/integration-environment.yml
           channels: conda-forge,bioconda
+          conda-remove-defaults: true
           channel-priority: flexible
           use-mamba: true
 
@@ -203,6 +204,7 @@ jobs:
           auto-update-conda: true
           python-version: ${{ env.PYTHON_VERSION }}
           channels: conda-forge,bioconda
+          conda-remove-defaults: true
           channel-priority: flexible
           use-mamba: true
 
