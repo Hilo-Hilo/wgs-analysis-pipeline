@@ -211,7 +211,7 @@ jobs:
       - name: Install tools
         shell: bash -el {0}
         run: |
-          mamba create -n ${{ env.CONDA_ENV }} -c conda-forge -c bioconda \
+          conda create -n ${{ env.CONDA_ENV }} -c conda-forge -c bioconda \
             python=${{ env.PYTHON_VERSION }} fastqc fastp -y
           conda activate ${{ env.CONDA_ENV }}
 
