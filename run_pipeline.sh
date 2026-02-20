@@ -25,6 +25,8 @@ ENABLE_NOTIFICATIONS=false
 EMAIL_ADDRESS=""
 SLACK_WEBHOOK=""
 RESUME_FROM=""
+ASSUME_YES=false
+SKIP_REQUIREMENTS_CHECK=false
 
 # Help function
 show_help() {
@@ -44,6 +46,8 @@ OPTIONS:
     --notify-email EMAIL        Send email notifications
     --notify-slack WEBHOOK      Send Slack notifications
     --steps STEPS               Run specific steps only (comma-separated)
+    -y, --yes                   Continue on requirement warnings without prompting
+    --skip-requirements-check   Skip running scripts/check_requirements.sh
     --dry-run                   Show what would be done without executing
     --verbose                   Enable verbose output
 
@@ -114,6 +118,14 @@ parse_arguments() {
                 SPECIFIC_STEPS="$2"
                 shift 2
                 ;;
+            -y|--yes)
+                ASSUME_YES=true
+                shift
+                ;;
+            --skip-requirements-check)
+                SKIP_REQUIREMENTS_CHECK=true
+                shift
+                ;;
             --dry-run)
                 DRY_RUN=true
                 shift
@@ -139,6 +151,8 @@ set_defaults() {
     OUTPUT_DIR="${OUTPUT_DIR:-results}"
     DRY_RUN="${DRY_RUN:-false}"
     VERBOSE="${VERBOSE:-false}"
+    ASSUME_YES="${ASSUME_YES:-false}"
+    SKIP_REQUIREMENTS_CHECK="${SKIP_REQUIREMENTS_CHECK:-false}"
 }
 
 # Define pipeline steps
@@ -267,12 +281,29 @@ validate_environment() {
     fi
     
     # Run system requirements check if available
-    if [[ -f "$SCRIPT_DIR/scripts/check_requirements.sh" ]]; then
-        if ! "$SCRIPT_DIR/scripts/check_requirements.sh" --min-ram 16 --min-disk 400; then
+    if [[ "$SKIP_REQUIREMENTS_CHECK" == "true" ]]; then
+        echo "⚠️ Skipping system requirements check (--skip-requirements-check)"
+    elif [[ -f "$SCRIPT_DIR/scripts/check_requirements.sh" ]]; then
+        local req_args=(--min-ram 16 --min-disk 400)
+
+        # Dry-run should not require full bioinformatics stack.
+        if [[ "$DRY_RUN" == "true" ]]; then
+            req_args+=(--skip-conda --skip-env --skip-tools)
+        fi
+
+        if ! "$SCRIPT_DIR/scripts/check_requirements.sh" "${req_args[@]}"; then
             echo "⚠️ System requirements check failed"
-            read -p "Continue anyway? (y/N): " -r
-            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+
+            if [[ "$ASSUME_YES" == "true" ]]; then
+                echo "⚠️ Continuing due to --yes"
+            elif [[ ! -t 0 ]]; then
+                echo "❌ Non-interactive session: rerun with --yes or --skip-requirements-check to continue."
                 exit 1
+            else
+                read -p "Continue anyway? (y/N): " -r
+                if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                    exit 1
+                fi
             fi
         fi
     fi
@@ -300,6 +331,10 @@ show_pipeline_summary() {
     
     if [[ "$DRY_RUN" == "true" ]]; then
         printf "Mode: DRY RUN (no actual processing)\n"
+    fi
+
+    if [[ "$SKIP_REQUIREMENTS_CHECK" == "true" ]]; then
+        printf "Requirements Check: Skipped\n"
     fi
     
     echo

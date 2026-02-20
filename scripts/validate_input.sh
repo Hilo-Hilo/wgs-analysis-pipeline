@@ -20,21 +20,41 @@ VALIDATION_ERRORS=0
 # Logging functions
 log_pass() {
     echo -e "${GREEN}✓${NC} $1"
-    ((VALIDATION_PASSED++))
+    VALIDATION_PASSED=$((VALIDATION_PASSED + 1))
 }
 
 log_warn() {
     echo -e "${YELLOW}⚠${NC} $1"
-    ((VALIDATION_WARNINGS++))
+    VALIDATION_WARNINGS=$((VALIDATION_WARNINGS + 1))
 }
 
 log_error() {
     echo -e "${RED}✗${NC} $1"
-    ((VALIDATION_ERRORS++))
+    VALIDATION_ERRORS=$((VALIDATION_ERRORS + 1))
 }
 
 log_info() {
     echo -e "${BLUE}ℹ${NC} $1"
+}
+
+show_help() {
+    cat << EOF
+WGS Pipeline Input Validator
+
+USAGE:
+  $0 <R1.fastq> <R2.fastq> <reference.fa> <sample_id> [output_dir]
+
+DESCRIPTION:
+  Validates FASTQ pair integrity, reference genome format, sample ID format,
+  and basic system resource requirements before running the WGS pipeline.
+
+EXAMPLES:
+  $0 data/raw/sample_R1.fastq.gz data/raw/sample_R2.fastq.gz data/reference/GRCh38.fa MySample
+  $0 reads_1.fq reads_2.fq ref.fasta SAMPLE001 results/
+
+OPTIONS:
+  -h, --help   Show this help message and exit
+EOF
 }
 
 # Check if file exists and is readable
@@ -136,16 +156,16 @@ validate_fastq_format() {
         case $pos_in_read in
             0)  # Header line
                 if [[ ! "$line" =~ ^@.+$ ]]; then
-                    ((format_errors++))
+                    format_errors=$((format_errors + 1))
                     if [[ $format_errors -le 3 ]]; then
                         log_error "Invalid header line $((line_num + 1)): $line"
                     fi
                 fi
-                ((read_count++))
+                read_count=$((read_count + 1))
                 ;;
             1)  # Sequence line
                 if [[ ! "$line" =~ ^[ATCGN]+$ ]]; then
-                    ((format_errors++))
+                    format_errors=$((format_errors + 1))
                     if [[ $format_errors -le 3 ]]; then
                         log_error "Invalid sequence line $((line_num + 1)): contains non-ATCGN characters"
                     fi
@@ -153,7 +173,7 @@ validate_fastq_format() {
                 ;;
             2)  # Plus line
                 if [[ ! "$line" =~ ^\+.*$ ]]; then
-                    ((format_errors++))
+                    format_errors=$((format_errors + 1))
                     if [[ $format_errors -le 3 ]]; then
                         log_error "Invalid plus line $((line_num + 1)): $line"
                     fi
@@ -166,7 +186,7 @@ validate_fastq_format() {
                 qual_length=$((qual_length - 1))  # Remove newline
                 
                 if [[ $seq_length -ne $qual_length ]]; then
-                    ((format_errors++))
+                    format_errors=$((format_errors + 1))
                     if [[ $format_errors -le 3 ]]; then
                         log_error "Sequence/quality length mismatch at read $read_count"
                     fi
@@ -174,7 +194,7 @@ validate_fastq_format() {
                 ;;
         esac
         
-        ((line_num++))
+        line_num=$((line_num + 1))
     done < "$temp_sample"
     
     rm -f "$temp_sample"
@@ -182,7 +202,7 @@ validate_fastq_format() {
     # Check if we have complete reads (line count should be multiple of 4)
     if [[ $((line_num % 4)) -ne 0 ]]; then
         log_error "Incomplete FASTQ records (line count not multiple of 4)"
-        ((format_errors++))
+        format_errors=$((format_errors + 1))
     fi
     
     if [[ $format_errors -eq 0 ]]; then
@@ -252,7 +272,7 @@ validate_fastq_pair() {
         local r2_base=$(echo "$r2_header" | sed 's|/[12]$||' | sed 's| [12]:.*||')
         
         if [[ "$r1_base" != "$r2_base" ]]; then
-            ((pairing_errors++))
+            pairing_errors=$((pairing_errors + 1))
             if [[ $pairing_errors -le 3 ]]; then
                 log_error "Pairing mismatch at read $line_num:"
                 log_error "  R1: $r1_header"
@@ -260,7 +280,7 @@ validate_fastq_pair() {
             fi
         fi
         
-        ((line_num++))
+        line_num=$((line_num + 1))
     done 3< "$temp_r1" 4< "$temp_r2"
     
     rm -f "$temp_r1" "$temp_r2"
@@ -299,14 +319,14 @@ validate_reference_genome() {
     
     while IFS= read -r line && [[ $line_count -lt 1000 ]]; do
         if [[ "$line" =~ ^'>'.*$ ]]; then
-            ((header_count++))
+            header_count=$((header_count + 1))
         elif [[ "$line" =~ ^[ATCGN]+$ ]]; then
             seq_length=$((seq_length + ${#line}))
         elif [[ -n "$line" ]]; then
             log_error "Invalid characters in reference sequence"
             return 1
         fi
-        ((line_count++))
+        line_count=$((line_count + 1))
     done < "$reference"
     
     if [[ $header_count -eq 0 ]]; then
@@ -503,17 +523,16 @@ validate_wgs_inputs() {
 # Command line interface
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     # Script is being run directly, not sourced
+    if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+        show_help
+        exit 0
+    fi
+
     if [[ $# -lt 4 ]]; then
-        echo "WGS Pipeline Input Validator"
-        echo
-        echo "Usage: $0 <R1.fastq> <R2.fastq> <reference.fa> <sample_id> [output_dir]"
-        echo
-        echo "Examples:"
-        echo "  $0 data/raw/sample_R1.fastq.gz data/raw/sample_R2.fastq.gz data/reference/GRCh38.fa MySample"
-        echo "  $0 reads_1.fq reads_2.fq ref.fasta SAMPLE001 results/"
+        show_help
         exit 1
     fi
-    
+
     validate_wgs_inputs "$@"
     exit $?
 fi

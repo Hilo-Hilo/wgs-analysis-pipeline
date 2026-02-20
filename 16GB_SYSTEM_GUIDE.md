@@ -23,12 +23,14 @@ See [INPUT_OUTPUT_SPECIFICATION.md](INPUT_OUTPUT_SPECIFICATION.md) for complete 
 
 # 2. Install tools
 conda create -n wgs_analysis -c bioconda -c conda-forge \
-    python=3.9 fastqc fastp bwa samtools bcftools vep
+    python=3.9 fastqc fastp bwa samtools bcftools ensembl-vep
 conda activate wgs_analysis
 
-# 3. Use 16GB configuration
-source config/local_16gb.conf
+# 3. Use the built-in 16GB defaults
+# Scripts already load config/default.conf (no extra file to source)
 ```
+
+`config/local_16gb.conf` is no longer used. For stricter low-resource settings, use values from `config/profiles/laptop.conf` as a tuning reference.
 
 ## Complete Analysis Workflow
 
@@ -59,9 +61,7 @@ cd ../../..
 
 ### Step 3: Run Analysis Pipeline
 ```bash
-# Load 16GB optimized settings
-source config/local_16gb.conf
-
+# The scripts use 16GB-optimized defaults from config/default.conf
 # Run each step sequentially (prevents memory issues)
 ./scripts/quality_control.sh --threads 4              # 10-30 minutes
 ./scripts/data_cleaning.sh --threads 4                # 30-90 minutes
@@ -79,28 +79,28 @@ After successful completion, you will have:
 ```
 results/
 ├── quality_control/
-│   ├── sample_R1_fastqc.html          # View in browser
-│   ├── sample_R2_fastqc.html          # View in browser
-│   └── quality_summary.txt            # Quality metrics
+│   ├── <sample>_R1_fastqc.html              # View in browser
+│   ├── <sample>_R2_fastqc.html              # View in browser
+│   └── quality_control_summary.txt          # Quality metrics
 ├── alignment/
-│   ├── sample_sorted.bam              # Main alignment file (80-120GB)
-│   ├── sample_sorted.bam.bai          # Index file
-│   └── alignment_stats.txt            # Mapping statistics
+│   ├── LOCAL_SAMPLE_aligned_sorted.bam      # Main alignment file (80-120GB)
+│   ├── LOCAL_SAMPLE_aligned_sorted.bam.bai  # Index file
+│   └── LOCAL_SAMPLE_alignment_stats.txt     # Mapping statistics
 ├── variants/
-│   ├── sample_filtered.vcf.gz         # Quality-filtered variants
-│   └── variant_stats.txt              # Variant statistics
+│   ├── LOCAL_SAMPLE_filtered.vcf.gz         # Quality-filtered variants
+│   └── LOCAL_SAMPLE_variant_stats.txt       # Variant statistics
 └── annotation/
-    ├── sample_annotated.vcf.gz        # MAIN OUTPUT - annotated variants
-    ├── sample_high_impact.txt         # Clinically important variants
-    └── sample_clinvar.txt             # Known disease variants
+    ├── LOCAL_SAMPLE_annotated.vcf.gz        # MAIN OUTPUT - annotated variants
+    ├── LOCAL_SAMPLE_high_impact.txt         # Clinically important variants
+    └── LOCAL_SAMPLE_clinvar.txt             # Known disease variants
 ```
 
 ## Key Files for Analysis
 
-1. **sample_annotated.vcf.gz** - Complete annotated variants for downstream analysis
-2. **sample_high_impact.txt** - High-impact variants (likely functional effects)
-3. **sample_clinvar.txt** - Variants with known clinical significance
-4. **alignment_stats.txt** - Check mapping rate (should be >85%)
+1. **`*_annotated.vcf.gz`** - Complete annotated variants for downstream analysis
+2. **`*_high_impact.txt`** - High-impact variants (likely functional effects)
+3. **`*_clinvar.txt`** - Variants with known clinical significance
+4. **`*_alignment_stats.txt`** - Check mapping rate (should be >85%)
 
 ## Memory Management Features
 
@@ -143,8 +143,8 @@ du -sh results/*
 ### Slow Performance
 ```bash
 # Use fewer threads if system is struggling
-export THREADS=2
-source config/local_16gb.conf
+./scripts/quality_control.sh --threads 2
+./scripts/alignment.sh --threads 2
 
 # Monitor system resources
 top
@@ -162,13 +162,13 @@ iostat 1
 ### Check Results
 ```bash
 # Mapping rate
-grep "mapped (" results/alignment/alignment_stats.txt
+grep "mapped (" results/alignment/*_alignment_stats.txt
 
 # Variant count
-bcftools stats results/variants/sample_filtered.vcf.gz | grep "number of records"
+bcftools stats results/variants/*_filtered.vcf.gz | grep "number of records"
 
 # High-impact count
-wc -l results/annotation/sample_high_impact.txt
+wc -l results/annotation/*_high_impact.txt
 ```
 
 ## Performance Tips for 16GB Systems
@@ -200,17 +200,17 @@ wc -l results/annotation/sample_high_impact.txt
 
 ### Storage Recommendations
 - **Keep**: annotated.vcf.gz, high_impact.txt, clinvar.txt
-- **Archive**: sorted.bam, alignment_stats.txt
+- **Archive**: `*_aligned_sorted.bam`, `*_alignment_stats.txt`
 - **Delete**: intermediate files, logs (after confirming success)
 
 ### Backup Strategy
 ```bash
 # Compress and backup essential results
 tar -czf sample_analysis_results.tar.gz \
-    results/annotation/sample_annotated.vcf.gz \
-    results/annotation/sample_high_impact.txt \
-    results/annotation/sample_clinvar.txt \
-    results/alignment/alignment_stats.txt
+    results/annotation/LOCAL_SAMPLE_annotated.vcf.gz \
+    results/annotation/LOCAL_SAMPLE_high_impact.txt \
+    results/annotation/LOCAL_SAMPLE_clinvar.txt \
+    results/alignment/LOCAL_SAMPLE_alignment_stats.txt
 
 # Store compressed backup safely
 ```

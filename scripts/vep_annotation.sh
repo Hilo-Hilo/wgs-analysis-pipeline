@@ -13,6 +13,9 @@ SCRIPT_NAME="vep_annotation.sh"
 # Load 16GB optimized configuration
 source config/default.conf
 
+# Track CLI overrides explicitly
+CLI_SAMPLE_ID=""
+
 # Help function
 show_help() {
     cat << EOF
@@ -100,6 +103,7 @@ parse_arguments() {
                 shift 2
                 ;;
             -s|--sample-id)
+                CLI_SAMPLE_ID="$2"
                 SAMPLE_ID="$2"
                 shift 2
                 ;;
@@ -156,7 +160,11 @@ info() {
 # Set default values from config
 set_defaults() {
     OUTPUT_DIR="${OUTPUT_DIR:-results/annotation}"
-    SAMPLE_ID="${SAMPLE_ID:-LOCAL_SAMPLE}"
+    if [[ -n "${CLI_SAMPLE_ID:-}" ]]; then
+        SAMPLE_ID="$CLI_SAMPLE_ID"
+    else
+        SAMPLE_ID="${SAMPLE_ID:-LOCAL_SAMPLE}"
+    fi
     THREADS="${THREADS:-${VEP_THREADS:-2}}"
     VEP_CACHE_DIR="${VEP_CACHE_DIR:-${REFERENCE_DIR}/vep_cache}"
     BUFFER_SIZE="${BUFFER_SIZE:-${VEP_BUFFER_SIZE:-1000}}"

@@ -17,6 +17,8 @@ DEFAULT_CONFIG_FILE="config/default.conf"
 # Load configuration from file
 load_config() {
     local config_file="$1"
+    # Preserve CLI overrides from caller (if provided)
+    local cli_sample_id="${CLI_SAMPLE_ID:-${SAMPLE_ID:-}}"
     
     # Check for active profile first
     if [[ -z "$config_file" ]]; then
@@ -49,6 +51,11 @@ load_config() {
     # Source the configuration file
     echo "Loading configuration: $config_file" >&2
     source "$config_file"
+
+    # Re-apply CLI sample override if set (CLI must win over config)
+    if [[ -n "$cli_sample_id" ]]; then
+        SAMPLE_ID="$cli_sample_id"
+    fi
     
     # Set derived variables
     set_derived_variables

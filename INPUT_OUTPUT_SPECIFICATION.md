@@ -15,9 +15,9 @@ This pipeline transforms raw whole genome sequencing (WGS) data into annotated v
 
 ### Reference Genome
 - **Human Reference Genome**:
-  - GRCh38/hg38: 3.2GB download
-- **BWA Indexes**: Generated automatically (adds ~3GB)
-- **samtools Index**: Generated automatically (adds ~200MB)
+  - GRCh38/hg38: ~3.2GB download
+- **BWA Indexes**: Must exist before alignment (`.amb/.ann/.bwt/.pac/.sa`, adds ~3GB)
+- **samtools Index**: Must exist before alignment (`.fai`, adds ~200MB)
 
 ### System Requirements
 - **RAM**: 16GB (pipeline optimized for this constraint)
@@ -28,45 +28,48 @@ This pipeline transforms raw whole genome sequencing (WGS) data into annotated v
 ## Complete Output Structure
 
 ```
+data/
+├── raw/
+│   ├── <sample>_R1.fastq.gz               # Input FASTQ (forward)
+│   └── <sample>_R2.fastq.gz               # Input FASTQ (reverse)
+├── processed/
+│   ├── LOCAL_SAMPLE_clean_R1.fq.gz        # Cleaned reads (forward)
+│   ├── LOCAL_SAMPLE_clean_R2.fq.gz        # Cleaned reads (reverse)
+│   └── LOCAL_SAMPLE_cleaning_summary.txt  # Trimming summary
+└── reference/
+    └── GRCh38/GRCh38_latest_genomic.fna   # Reference FASTA (+ BWA indexes)
+
 results/
 ├── quality_control/
-│   ├── fastqc_reports/
-│   │   ├── sample_R1_fastqc.html           # Quality control report (web viewable)
-│   │   ├── sample_R1_fastqc.zip            # Detailed QC data
-│   │   ├── sample_R2_fastqc.html           # Quality control report (web viewable)
-│   │   └── sample_R2_fastqc.zip            # Detailed QC data
-│   └── quality_summary.txt                 # Overall quality metrics
-│
-├── cleaned_reads/
-│   ├── sample_clean_R1.fastq.gz            # Adapter-trimmed forward reads
-│   ├── sample_clean_R2.fastq.gz            # Adapter-trimmed reverse reads
-│   └── cleaning_report.txt                 # Trimming statistics
-│
+│   ├── <sample>_R1_fastqc.html            # FastQC report (web viewable)
+│   ├── <sample>_R2_fastqc.html
+│   ├── <sample>_R1_fastqc.zip
+│   ├── <sample>_R2_fastqc.zip
+│   └── quality_control_summary.txt
 ├── alignment/
-│   ├── sample_sorted.bam                   # Primary alignment file (80-120GB)
-│   ├── sample_sorted.bam.bai               # BAM index file
-│   ├── alignment_stats.txt                 # Mapping statistics
-│   └── coverage_summary.txt                # Coverage depth metrics
-│
+│   ├── LOCAL_SAMPLE_aligned_sorted.bam
+│   ├── LOCAL_SAMPLE_aligned_sorted.bam.bai
+│   ├── LOCAL_SAMPLE_alignment_stats.txt
+│   └── LOCAL_SAMPLE_alignment_summary.txt
 ├── variants/
-│   ├── sample_raw.vcf.gz                   # Raw variant calls (1-5GB)
-│   ├── sample_raw.vcf.gz.tbi               # VCF index
-│   ├── sample_filtered.vcf.gz              # Quality-filtered variants
-│   ├── sample_filtered.vcf.gz.tbi          # Filtered VCF index
-│   └── variant_stats.txt                   # Variant calling statistics
-│
+│   ├── LOCAL_SAMPLE_raw.vcf.gz
+│   ├── LOCAL_SAMPLE_raw.vcf.gz.csi
+│   ├── LOCAL_SAMPLE_filtered.vcf.gz
+│   ├── LOCAL_SAMPLE_filtered.vcf.gz.csi
+│   └── LOCAL_SAMPLE_variant_stats.txt
 └── annotation/
-    ├── sample_annotated.vcf.gz              # Fully annotated variants
-    ├── sample_annotated.vcf.gz.tbi          # Annotated VCF index
-    ├── sample_high_impact.txt               # High-impact variants only
-    ├── sample_clinvar.txt                   # ClinVar matches
-    └── annotation_summary.txt               # Annotation statistics
+    ├── LOCAL_SAMPLE_annotated.vcf.gz
+    ├── LOCAL_SAMPLE_annotated.vcf.gz.csi
+    ├── LOCAL_SAMPLE_high_impact.txt
+    ├── LOCAL_SAMPLE_clinvar.txt
+    └── LOCAL_SAMPLE_annotation_stats.txt
 
 logs/
-├── quality_control.log                     # QC process logs
-├── alignment.log                           # Alignment process logs
-├── variant_calling.log                     # Variant calling logs
-└── annotation.log                          # Annotation logs
+├── quality_control.log
+├── data_cleaning.log
+├── alignment.log
+├── variant_calling.log
+└── annotation.log
 ```
 
 ## Expected File Sizes (30x WGS)
@@ -85,18 +88,18 @@ logs/
 ## Key Output Files for Analysis
 
 ### For Quality Assessment
-- `results/quality_control/sample_R1_fastqc.html` - View in web browser
-- `results/quality_control/sample_R2_fastqc.html` - View in web browser
-- `results/alignment/alignment_stats.txt` - Check mapping rate
+- `results/quality_control/*_fastqc.html` - View in web browser
+- `results/quality_control/quality_control_summary.txt` - Overall QC summary
+- `results/alignment/*_alignment_stats.txt` - Check mapping rate
 
 ### For Variant Analysis
-- `results/annotation/sample_annotated.vcf.gz` - Main analysis file
-- `results/annotation/sample_high_impact.txt` - Clinically relevant variants
-- `results/annotation/sample_clinvar.txt` - Known pathogenic variants
+- `results/annotation/*_annotated.vcf.gz` - Main analysis file
+- `results/annotation/*_high_impact.txt` - Clinically relevant variants
+- `results/annotation/*_clinvar.txt` - Known pathogenic variants
 
 ### For Further Processing
-- `results/alignment/sample_sorted.bam` - For structural variants, CNVs
-- `results/variants/sample_filtered.vcf.gz` - For custom analysis pipelines
+- `results/alignment/*_aligned_sorted.bam` - For structural variants, CNVs
+- `results/variants/*_filtered.vcf.gz` - For custom analysis pipelines
 
 ## Memory-Optimized Processing Strategy
 

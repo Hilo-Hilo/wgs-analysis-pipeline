@@ -1,19 +1,13 @@
-# WGS Analysis Pipeline - Git Ignore File
-# This ensures no personal genomic data is accidentally committed
-
-# ============================================
-# GENOMIC DATA FILES - NEVER COMMIT THESE
-# ============================================
-
-# Raw sequencing data
+# Genomic data (never commit)
 *.fq
 *.fq.gz
 *.fastq
 *.fastq.gz
-*.fa
-*.fa.gz
 *.fasta
 *.fasta.gz
+*.fa
+*.fa.gz
+*.fna
 
 # Alignment files
 *.bam
@@ -22,7 +16,7 @@
 *.cram
 *.crai
 
-# Variant files (contain personal genetic information)
+# Variant files
 *.vcf
 *.vcf.gz
 *.vcf.gz.tbi
@@ -32,9 +26,7 @@
 *.gvcf
 *.gvcf.gz
 
-# Reference genome files (large)
-*.fa
-*.fna
+# Reference genome indices
 *.fai
 *.dict
 *.amb
@@ -45,175 +37,33 @@
 *.sa
 *.0123
 
-# ============================================
-# PERSONAL ANALYSIS RESULTS
-# ============================================
+# Pipeline data/output directories
+data/
+results/
+logs/
+temp/
 
-# Reports with personal information
-*personal*
-*medical*
-*clinical*
-*patient*
-*report*.txt
-*report*.pdf
-affected_genes*
-*variants.txt
-*mutations.txt
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+*.egg-info/
+venv/
+.venv/
+.env
 
-# Sample-specific files
-E200032534*
-SAMPLE001*  # Also exclude anonymized sample names if they contain data
-
-# ============================================
-# DIRECTORIES TO EXCLUDE
-# ============================================
-
-# Data directories
-data/raw/
-data/processed/
-data/reference/
-
-# Results directories with personal data
-results/alignment/
-results/variant_calling/
-results/variants/
-personal_analysis/*.txt
-personal_analysis/*.html
-personal_analysis/*.pdf
-
-# ============================================
-# TEMPORARY AND LOG FILES
-# ============================================
-
-# Temporary files
-*.tmp
-*.temp
-*.log
-*.out
-*.err
-.snakemake/
-work/
-
-# Cache and index files
-*.idx
-*.index
-*.cache
-
-# ============================================
-# SYSTEM FILES
-# ============================================
-
-# macOS
+# OS files
 .DS_Store
-.AppleDouble
-.LSOverride
-Icon
-._*
-
-# Linux
-*~
-.directory
-.Trash-*
-
-# Windows
 Thumbs.db
-ehthumbs.db
-Desktop.ini
 
-# ============================================
-# IDE AND EDITOR FILES
-# ============================================
-
-# VSCode
+# Editor/IDE
 .vscode/
-*.code-workspace
-
-# PyCharm
 .idea/
-*.iml
-
-# Jupyter
-.ipynb_checkpoints/
-*.ipynb_checkpoints
-
-# Vim
 *.swp
 *.swo
 *~
 
-# Emacs
-*~
-\#*\#
-.\#*
-
-# ============================================
-# PYTHON
-# ============================================
-
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-env/
-venv/
-ENV/
-.env
-
-# ============================================
-# R
-# ============================================
-
-.Rhistory
-.Rdata
-.Rproj.user/
-
-# ============================================
-# DOCUMENTATION BUILD FILES
-# ============================================
-
-docs/_build/
-docs/_static/
-docs/_templates/
-*.html
-*.pdf
-
-# ============================================
-# CLOUD AND CREDENTIALS
-# ============================================
-
-# AWS
-*.pem
-credentials
-.aws/
-
-# Google Cloud
-*.json
-.gcloud/
-gcloud_credentials/
-
-# API Keys
-*api_key*
-*secret*
-*token*
-.env
-
-# ============================================
-# EXCEPTION - ALLOW THESE
-# ============================================
-
-# Documentation
-!README.md
-!INSTALL.md
-!CONTRIBUTING.md
-!LICENSE
-!docs/*.md
-
-# Scripts (without output)
-!scripts/*.sh
-!scripts/*.py
-!analysis/*.py
-
-# Configuration templates
-!config/template.*
-!examples/config.*
+# Snakemake / Nextflow
+.snakemake/
+work/

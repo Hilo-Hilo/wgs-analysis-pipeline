@@ -95,8 +95,14 @@ list_profiles() {
         return 1
     fi
     
-    local profiles
-    mapfile -t profiles < <(find "$PROFILES_DIR" -name "*.conf" -exec basename {} .conf \; | sort)
+    local profiles=()
+    if command -v mapfile >/dev/null 2>&1; then
+        mapfile -t profiles < <(find "$PROFILES_DIR" -name "*.conf" -exec basename {} .conf \; | sort)
+    else
+        while IFS= read -r profile_name; do
+            profiles+=("$profile_name")
+        done < <(find "$PROFILES_DIR" -name "*.conf" -exec basename {} .conf \; | sort)
+    fi
     
     if [[ ${#profiles[@]} -eq 0 ]]; then
         warning "No profiles found in $PROFILES_DIR"
@@ -249,7 +255,7 @@ validate_profile() {
     for setting in "${required_settings[@]}"; do
         if ! grep -q "^${setting}=" "$profile_file"; then
             [[ "$quiet" != "--quiet" ]] && error "Missing required setting: $setting"
-            ((validation_errors++))
+            validation_errors=$((validation_errors + 1))
         fi
     done
     
@@ -266,7 +272,7 @@ validate_profile() {
         value=$(grep "^${setting}=" "$profile_file" 2>/dev/null | cut -d'=' -f2)
         if [[ -n "$value" && ! "$value" =~ ^[0-9]+$ ]]; then
             [[ "$quiet" != "--quiet" ]] && error "Invalid numeric value for $setting: $value"
-            ((validation_errors++))
+            validation_errors=$((validation_errors + 1))
         fi
     done
     

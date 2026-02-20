@@ -20,6 +20,9 @@ EXPECTED_DIR="$TEST_DIR/expected_outputs"
 TEMP_TEST_DIR="/tmp/wgs_pipeline_test_$$"
 VERBOSE=false
 CLEANUP=true
+UNIT_ONLY=false
+INTEGRATION_ONLY=false
+QUICK_TESTS=false
 
 # Logging functions
 log() {
@@ -153,80 +156,90 @@ EOF
 # Unit tests
 run_unit_tests() {
     log "Running unit tests..."
-    
+
     local tests_passed=0
     local tests_failed=0
-    
-    # Test 1: Check requirements script
-    info "Testing requirements checker..."
-    if "$ROOT_DIR/scripts/check_requirements.sh" --min-ram 1 --min-disk 1 > /dev/null 2>&1; then
-        echo "  ✓ Requirements checker works"
-        ((tests_passed++))
+
+    # Test 1: Requirements checker smoke mode (portable, no conda/toolchain required)
+    info "Testing requirements checker (smoke mode)..."
+    if "$ROOT_DIR/scripts/check_requirements.sh" \
+        --min-ram 1 \
+        --min-disk 1 \
+        --skip-conda \
+        --skip-env \
+        --skip-tools > /dev/null 2>&1; then
+        echo "  ✓ Requirements checker smoke mode works"
+        tests_passed=$((tests_passed + 1))
     else
-        echo "  ✗ Requirements checker failed"
-        ((tests_failed++))
+        echo "  ✗ Requirements checker smoke mode failed"
+        tests_failed=$((tests_failed + 1))
     fi
-    
+
     # Test 2: Configuration loading
     info "Testing configuration loading..."
-    if source "$ROOT_DIR/scripts/load_config.sh" && load_config "config/default.conf"; then
+    if bash -c "cd '$TEMP_TEST_DIR' && source '$ROOT_DIR/scripts/load_config.sh' && load_config config/default.conf" > /dev/null 2>&1; then
         echo "  ✓ Configuration loading works"
-        ((tests_passed++))
+        tests_passed=$((tests_passed + 1))
     else
         echo "  ✗ Configuration loading failed"
-        ((tests_failed++))
+        tests_failed=$((tests_failed + 1))
     fi
-    
-    # Test 3: Help messages for all scripts
+
+    # Test 3: Help messages for scripts
     info "Testing help messages..."
     local help_tests_passed=0
     for script in "$ROOT_DIR/scripts"/*.sh; do
         local script_name
         script_name=$(basename "$script")
-        if [[ "$script_name" == "load_config.sh" ]]; then
-            continue  # Skip utility script
-        fi
-        
+
         if "$script" --help > /dev/null 2>&1; then
             info "  ✓ $script_name help works"
-            ((help_tests_passed++))
+            help_tests_passed=$((help_tests_passed + 1))
         else
             warning "  ✗ $script_name help failed"
         fi
     done
-    
+
     if [[ $help_tests_passed -gt 0 ]]; then
         echo "  ✓ Help messages work ($help_tests_passed scripts)"
-        ((tests_passed++))
+        tests_passed=$((tests_passed + 1))
     else
         echo "  ✗ No help messages work"
-        ((tests_failed++))
+        tests_failed=$((tests_failed + 1))
     fi
-    
-    # Test 4: Dry run functionality
-    info "Testing dry run modes..."
-    local dry_run_passed=0
-    for script in "$ROOT_DIR/scripts"/{quality_control,data_cleaning,alignment,variant_calling}.sh; do
-        if [[ -f "$script" ]]; then
-            local script_name
+
+    # Test 4: Argument handling (invalid flag should be rejected)
+    info "Testing script argument handling..."
+    local arg_scripts=(
+        "$ROOT_DIR/scripts/check_requirements.sh"
+        "$ROOT_DIR/scripts/quality_control.sh"
+        "$ROOT_DIR/scripts/data_cleaning.sh"
+        "$ROOT_DIR/scripts/alignment.sh"
+        "$ROOT_DIR/scripts/variant_calling.sh"
+        "$ROOT_DIR/scripts/vep_annotation.sh"
+    )
+    local arg_tests_failed=0
+
+    for script in "${arg_scripts[@]}"; do
+        local script_name
         script_name=$(basename "$script")
-            if timeout 30 "$script" --dry-run > /dev/null 2>&1; then
-                info "  ✓ $script_name dry run works"
-                ((dry_run_passed++))
-            else
-                warning "  ✗ $script_name dry run failed or timed out"
-            fi
+
+        if "$script" --definitely-invalid-option > /dev/null 2>&1; then
+            warning "  ✗ $script_name accepted an invalid option"
+            arg_tests_failed=$((arg_tests_failed + 1))
+        else
+            info "  ✓ $script_name rejected invalid option"
         fi
     done
-    
-    if [[ $dry_run_passed -gt 0 ]]; then
-        echo "  ✓ Dry run modes work ($dry_run_passed scripts)"
-        ((tests_passed++))
+
+    if [[ $arg_tests_failed -eq 0 ]]; then
+        echo "  ✓ Script argument handling works"
+        tests_passed=$((tests_passed + 1))
     else
-        echo "  ✗ No dry run modes work"
-        ((tests_failed++))
+        echo "  ✗ Script argument handling failed ($arg_tests_failed script(s))"
+        tests_failed=$((tests_failed + 1))
     fi
-    
+
     log "Unit tests completed: $tests_passed passed, $tests_failed failed"
     return $tests_failed
 }
@@ -251,10 +264,10 @@ run_integration_tests() {
         --sample-id test_sample \
         --threads 1 > /dev/null 2>&1; then
         echo "  ✓ Quality control completed"
-        ((tests_passed++))
+        tests_passed=$((tests_passed + 1))
     else
         echo "  ✗ Quality control failed"
-        ((tests_failed++))
+        tests_failed=$((tests_failed + 1))
     fi
     
     # Test 2: Data cleaning
@@ -266,10 +279,10 @@ run_integration_tests() {
         --threads 1 \
         --min-length 50 > /dev/null 2>&1; then
         echo "  ✓ Data cleaning completed"
-        ((tests_passed++))
+        tests_passed=$((tests_passed + 1))
     else
         echo "  ✗ Data cleaning failed or timed out"
-        ((tests_failed++))
+        tests_failed=$((tests_failed + 1))
     fi
     
     # Test 3: Check output files exist
@@ -284,7 +297,7 @@ run_integration_tests() {
     for file in "${output_files[@]}"; do
         if [[ -f "$file" ]]; then
             info "  ✓ Found: $file"
-            ((files_found++))
+            files_found=$((files_found + 1))
         else
             warning "  ✗ Missing: $file"
         fi
@@ -292,10 +305,10 @@ run_integration_tests() {
     
     if [[ $files_found -eq ${#output_files[@]} ]]; then
         echo "  ✓ All expected output files generated"
-        ((tests_passed++))
+        tests_passed=$((tests_passed + 1))
     else
         echo "  ✗ Some output files missing ($files_found/${#output_files[@]})"
-        ((tests_failed++))
+        tests_failed=$((tests_failed + 1))
     fi
     
     log "Integration tests completed: $tests_passed passed, $tests_failed failed"
@@ -323,17 +336,29 @@ main() {
     
     # Setup
     setup_test_environment
-    generate_test_data
+
+    # Integration data is only required when integration tests will actually run
+    if [[ "$UNIT_ONLY" != "true" && "$QUICK_TESTS" != "true" ]]; then
+        generate_test_data
+    fi
     
     # Run tests
     if [[ "$INTEGRATION_ONLY" != "true" ]]; then
+        local unit_failures=0
+        set +e
         run_unit_tests
-        ((total_failures += $?))
+        unit_failures=$?
+        set -e
+        total_failures=$((total_failures + unit_failures))
     fi
     
     if [[ "$UNIT_ONLY" != "true" ]]; then
+        local integration_failures=0
+        set +e
         run_integration_tests
-        ((total_failures += $?))
+        integration_failures=$?
+        set -e
+        total_failures=$((total_failures + integration_failures))
     fi
     
     # Results

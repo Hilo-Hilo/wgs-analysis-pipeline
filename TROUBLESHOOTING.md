@@ -136,10 +136,11 @@ gzip *.fastq  # Compress if needed
 ./scripts/quality_control.sh --input-dir /path/to/your/fastq/files
 ```
 
-**Option 3: Download sample data for testing**
+**Option 3: Generate synthetic sample data for testing**
 ```bash
-./scripts/download_sample_data.sh --type small
-./scripts/quality_control.sh --input-dir data/samples/fastq
+mkdir -p data/raw
+python3 tests/generate_sample_data.py --output-dir data/raw --sample-name troubleshoot --num-reads 5000
+./scripts/quality_control.sh --input-dir data/raw
 ```
 
 ### Error: "Permission denied"
@@ -303,7 +304,7 @@ WARNING: Mean quality score: 25 (below recommended 30)
 **Assessment:**
 ```bash
 # Check detailed FastQC report
-open results/fastqc_raw/*.html
+open results/quality_control/*.html
 
 # Look for:
 # - Per base sequence quality
@@ -395,7 +396,7 @@ WARNING: Low mapping rate: 75% (expected >85%)
 ```bash
 # 1. Check reference genome
 ls -la data/reference/
-head -5 data/reference/*/reference.fasta
+head -5 data/reference/GRCh38/GRCh38_latest_genomic.fna
 
 # 2. Check read quality
 ./scripts/quality_control.sh
@@ -411,8 +412,15 @@ samtools view results/alignment/*.bam | head -100
 # Human samples should use GRCh38
 # Check your sample species matches reference
 
-# Download correct reference
-./scripts/download_sample_data.sh --type reference --reference grch38
+# Download GRCh38 reference manually
+mkdir -p data/reference/GRCh38
+cd data/reference/GRCh38
+wget https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.40_GRCh38.p14/GCF_000001405.40_GRCh38.p14_genomic.fna.gz
+gunzip GCF_000001405.40_GRCh38.p14_genomic.fna.gz
+mv GCF_000001405.40_GRCh38.p14_genomic.fna GRCh38_latest_genomic.fna
+samtools faidx GRCh38_latest_genomic.fna
+bwa index GRCh38_latest_genomic.fna
+cd ../../..
 ```
 
 **Option 2: Poor read quality**
@@ -463,7 +471,14 @@ ERROR: Reference file not found: data/reference/GRCh38/GRCh38_latest_genomic.fna
 **Solutions:**
 ```bash
 # Option 1: Download reference
-./scripts/download_sample_data.sh --type reference --reference grch38
+mkdir -p data/reference/GRCh38
+cd data/reference/GRCh38
+wget https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/405/GCF_000001405.40_GRCh38.p14/GCF_000001405.40_GRCh38.p14_genomic.fna.gz
+gunzip GCF_000001405.40_GRCh38.p14_genomic.fna.gz
+mv GCF_000001405.40_GRCh38.p14_genomic.fna GRCh38_latest_genomic.fna
+samtools faidx GRCh38_latest_genomic.fna
+bwa index GRCh38_latest_genomic.fna
+cd ../../..
 
 # Option 2: Specify correct path
 ./scripts/alignment.sh --reference /path/to/your/reference.fa
@@ -628,13 +643,13 @@ KEEP_INTERMEDIATE_FILES=false
 **Check these with:**
 ```bash
 # Quality summary
-cat results/fastqc_raw/quality_control_summary.txt
+cat results/quality_control/quality_control_summary.txt
 
-# Alignment summary  
-cat results/alignment/*_summary.txt
+# Alignment summary
+cat results/alignment/*_alignment_summary.txt
 
 # Variant summary
-bcftools stats results/variants/*.vcf.gz
+bcftools stats results/variants/*_filtered.vcf.gz
 ```
 
 ### Question: Should I be concerned about these warnings?
@@ -728,7 +743,8 @@ df -h
 
 1. **Documentation**
    - [GETTING_STARTED.md](GETTING_STARTED.md)
-   - [Complete Analysis Workflow](documentation/complete_analysis_workflow.md)
+   - [16GB_SYSTEM_GUIDE.md](16GB_SYSTEM_GUIDE.md)
+   - [INPUT_OUTPUT_SPECIFICATION.md](INPUT_OUTPUT_SPECIFICATION.md)
 
 2. **Online Communities**
    - [Bioinformatics Stack Exchange](https://bioinformatics.stackexchange.com/)
@@ -766,7 +782,7 @@ df -h
 ./scripts/check_requirements.sh
 
 # 2. Start with small test data
-./scripts/download_sample_data.sh --type small
+python3 tests/generate_sample_data.py --output-dir data/raw --sample-name smoke --num-reads 2000
 
 # 3. Use dry-run mode first
 ./scripts/quality_control.sh --dry-run
