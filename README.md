@@ -124,17 +124,14 @@ CI runs automatically via GitHub Actions (`.github/workflows/test.yml`).
 │   ├── default.conf             # Default configuration
 │   └── profiles/                # Hardware-specific profiles
 ├── analysis/
-│   ├── comprehensive_analysis.py
-│   └── pharmacogenomics.py
+│   └── comprehensive_analysis.py
 ├── tests/
 │   ├── run_tests.sh             # Test suite
 │   └── generate_sample_data.py  # Synthetic data generator
 ├── GETTING_STARTED.md
 ├── TROUBLESHOOTING.md
-├── INPUT_OUTPUT_SPECIFICATION.md
 ├── Dockerfile
 ├── docker-compose.yml
-├── docker-helper.sh
 └── LICENSE
 ```
 

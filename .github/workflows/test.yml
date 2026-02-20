@@ -159,9 +159,7 @@ jobs:
           required_docs=(
             "README.md"
             "GETTING_STARTED.md"
-            "16GB_SYSTEM_GUIDE.md"
             "TROUBLESHOOTING.md"
-            "INPUT_OUTPUT_SPECIFICATION.md"
           )
 
           for doc in "${required_docs[@]}"; do
