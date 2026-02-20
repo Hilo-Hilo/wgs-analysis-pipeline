@@ -135,15 +135,12 @@ jobs:
           # Test that the image runs
           docker run --rm wgs-pipeline:test check_requirements.sh --help
 
-          # Test that tools are available
-          docker run --rm wgs-pipeline:test bash -c "
-            source activate wgs_analysis &&
-            fastqc --version &&
-            fastp --version &&
-            bwa 2>&1 | head -1 &&
-            samtools --version | head -1 &&
-            bcftools --version | head -1
-          "
+          # ENTRYPOINT already executes inside conda env (wgs_analysis)
+          docker run --rm wgs-pipeline:test fastqc --version
+          docker run --rm wgs-pipeline:test fastp --version
+          docker run --rm wgs-pipeline:test bash -lc "bwa 2>&1 | head -1"
+          docker run --rm wgs-pipeline:test bash -lc "samtools --version | head -1"
+          docker run --rm wgs-pipeline:test bash -lc "bcftools --version | head -1"
 
           echo "✅ Docker image tests passed!"
 

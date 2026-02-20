@@ -54,17 +54,19 @@ RUN wget "https://repo.anaconda.com/miniconda/${MINICONDA_INSTALLER}" -O minicon
 # Add conda to PATH
 ENV PATH="/opt/miniconda/bin:$PATH"
 
-# Accept conda terms of service and create conda environment with bioinformatics tools
-RUN conda config --set channel_priority strict && \
-    conda config --set always_yes true && \
-    conda create -n wgs_analysis python=3.9 && \
-    conda install -n wgs_analysis -c bioconda -c conda-forge \
-    fastqc=0.12.1 \
-    fastp=0.23.4 \
-    bwa=0.7.17 \
-    samtools=1.17 \
-    bcftools=1.17 \
-    ensembl-vep=110.1 && \
+# Create conda environment with bioinformatics tools
+# Use mamba + flexible priority for more reliable solves in CI.
+RUN conda config --set always_yes true && \
+    conda config --set channel_priority flexible && \
+    conda install -n base -c conda-forge mamba && \
+    mamba create -n wgs_analysis -c conda-forge -c bioconda \
+    python=3.11 \
+    fastqc \
+    fastp \
+    bwa \
+    samtools \
+    bcftools \
+    ensembl-vep && \
     conda clean -ya
 
 # Ensure tools from the analysis environment are on PATH

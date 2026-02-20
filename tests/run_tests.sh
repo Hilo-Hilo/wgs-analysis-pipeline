@@ -38,7 +38,10 @@ warning() {
 }
 
 info() {
-    [[ "$VERBOSE" == "true" ]] && echo -e "${BLUE}[INFO]${NC} $1"
+    if [[ "$VERBOSE" == "true" ]]; then
+        echo -e "${BLUE}[INFO]${NC} $1"
+    fi
+    return 0
 }
 
 # Help function
