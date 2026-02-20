@@ -27,3 +27,7 @@ lint: ## Run shellcheck on all .sh files (if installed)
 	else \
 		echo "shellcheck is not installed; skipping lint."; \
 	fi
+
+dev-setup: ## Install development dependencies (pre-commit)
+	pip3 install pre-commit
+	pre-commit install

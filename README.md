@@ -142,6 +142,13 @@ CI runs automatically via GitHub Actions (`.github/workflows/test.yml`).
 
 MIT — see [LICENSE](LICENSE).
 
+## Development
+
+We use `pre-commit` to maintain code quality.
+
+1. **Setup**: `make dev-setup`
+2. **Lint**: `make lint` (or auto-runs on commit)
+
 ## Citation
 
 ```bibtex
