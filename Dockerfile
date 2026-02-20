@@ -10,6 +10,7 @@ LABEL version="2.0-16GB"
 
 # Prevent interactive prompts during installation
 ARG DEBIAN_FRONTEND=noninteractive
+ARG MINICONDA_INSTALLER=Miniconda3-py39_24.3.0-0-Linux-x86_64.sh
 
 # Set working directory
 WORKDIR /opt/wgs-pipeline
@@ -45,7 +46,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install miniconda for bioinformatics tools
-RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh \
+RUN wget "https://repo.anaconda.com/miniconda/${MINICONDA_INSTALLER}" -O miniconda.sh \
     && bash miniconda.sh -b -p /opt/miniconda \
     && rm miniconda.sh \
     && /opt/miniconda/bin/conda clean -ya
@@ -66,8 +67,7 @@ RUN conda config --set channel_priority strict && \
     ensembl-vep=110.1 && \
     conda clean -ya
 
-# Activate environment by default
-RUN echo "source activate wgs_analysis" > ~/.bashrc
+# Ensure tools from the analysis environment are on PATH
 ENV PATH="/opt/miniconda/envs/wgs_analysis/bin:$PATH"
 
 # Install Python packages for testing and utilities
@@ -98,25 +98,15 @@ ENV PATH="/opt/wgs-pipeline/scripts:$PATH"
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD check_requirements.sh --min-ram 1 --min-disk 10 || exit 1
+    CMD check_requirements.sh --min-ram 1 --min-disk 10 --skip-conda --skip-env --skip-tools || exit 1
+
+# Run all commands inside the wgs_analysis conda environment
+ENTRYPOINT ["conda", "run", "--no-capture-output", "-n", "wgs_analysis"]
 
 # Default command
 CMD ["/bin/bash"]
 
 # Expose no ports (this is a compute container, not a service)
-
-# Documentation
-RUN echo "WGS Analysis Pipeline Container Ready!" > /tmp/container_ready.txt && \
-    echo "Available commands:" >> /tmp/container_ready.txt && \
-    echo "  check_requirements.sh  - Validate system" >> /tmp/container_ready.txt && \
-    echo "  quality_control.sh     - Run QC analysis" >> /tmp/container_ready.txt && \
-    echo "  data_cleaning.sh       - Clean reads" >> /tmp/container_ready.txt && \
-    echo "  alignment.sh           - Align to genome" >> /tmp/container_ready.txt && \
-    echo "  variant_calling.sh     - Call variants" >> /tmp/container_ready.txt && \
-    echo "  vep_annotation.sh      - Annotate variants" >> /tmp/container_ready.txt && \
-    echo "" >> /tmp/container_ready.txt && \
-    echo "Example usage:" >> /tmp/container_ready.txt && \
-    echo "  docker run -v /path/to/data:/opt/wgs-pipeline/data wgs-pipeline" >> /tmp/container_ready.txt
 
 # Build information
 ARG BUILD_DATE

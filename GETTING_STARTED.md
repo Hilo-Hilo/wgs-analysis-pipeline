@@ -10,12 +10,13 @@ If you want to jump right in and test the pipeline:
 # 1. Check if your system is ready
 ./scripts/check_requirements.sh
 
-# 2. Download sample data for testing
-./scripts/download_sample_data.sh --type small
+# 2. Generate small synthetic sample data for testing
+mkdir -p data/raw
+python3 tests/generate_sample_data.py --output-dir data/raw --sample-name quickstart --num-reads 2000
 
 # 3. Test quality control (takes ~2 minutes)
 conda activate wgs_analysis
-./scripts/quality_control.sh --input-dir data/samples/fastq --dry-run
+./scripts/quality_control.sh --input-dir data/raw --dry-run
 ```
 
 ## 📋 Prerequisites
@@ -52,7 +53,7 @@ source ~/.zshrc   # macOS with zsh
 ```bash
 # Create conda environment with all required tools
 conda create -n wgs_analysis -c bioconda -c conda-forge \
-    python=3.9 fastqc fastp bwa samtools bcftools multiqc
+    python=3.9 fastqc fastp bwa samtools bcftools ensembl-vep multiqc
 
 # Activate the environment
 conda activate wgs_analysis
@@ -85,12 +86,13 @@ Run the comprehensive system check:
 ### Option A: Test with Sample Data (Recommended for First Run)
 
 ```bash
-# Download small test dataset (100MB, ~5 minutes to analyze)
-./scripts/download_sample_data.sh --type small
+# Generate a small synthetic dataset (~a few MB)
+mkdir -p data/raw
+python3 tests/generate_sample_data.py --output-dir data/raw --sample-name test_small --num-reads 10000
 
 # This creates:
-# data/samples/fastq/          - Test FASTQ files
-# data/samples/expected_results/ - What results should look like
+# data/raw/test_small_R1.fastq.gz
+# data/raw/test_small_R2.fastq.gz
 ```
 
 ### Option B: Use Your Own Data
@@ -112,11 +114,11 @@ ls data/raw/  # Verify your files are there
 
 ```bash
 # Option 1: Use default settings (recommended for beginners)
-# No configuration needed - defaults work for most cases
+# Scripts are already tuned for 16GB systems via config/default.conf
 
-# Option 2: Create custom configuration (for advanced users)
-./scripts/load_config.sh create my_first_analysis
-# Then edit config/my_first_analysis.conf
+# Option 2: Adjust thread count per command when needed
+./scripts/quality_control.sh --threads 2
+./scripts/alignment.sh --threads 2
 ```
 
 ### Quality Control Analysis
@@ -131,7 +133,7 @@ conda activate wgs_analysis
 ./scripts/quality_control.sh
 
 # Or with custom input directory:
-./scripts/quality_control.sh --input-dir data/samples/fastq --output-dir results/sample_qc
+./scripts/quality_control.sh --input-dir data/raw --output-dir results/quality_control
 
 # View help for all options:
 ./scripts/quality_control.sh --help
@@ -144,20 +146,20 @@ conda activate wgs_analysis
 - Creates summary statistics
 
 **Expected output:**
-- `results/fastqc_raw/` - Quality control reports
-- `results/fastqc_raw/quality_control_summary.txt` - Summary statistics
+- `results/quality_control/` - Quality control reports
+- `results/quality_control/quality_control_summary.txt` - Summary statistics
 
 ### Review Quality Control Results
 
 ```bash
 # View the summary report
-cat results/fastqc_raw/quality_control_summary.txt
+cat results/quality_control/quality_control_summary.txt
 
 # Open HTML reports in your browser (macOS):
-open results/fastqc_raw/*.html
+open results/quality_control/*.html
 
 # Open HTML reports in your browser (Linux):
-firefox results/fastqc_raw/*.html &
+firefox results/quality_control/*.html &
 ```
 
 **What to look for:**
@@ -219,9 +221,10 @@ your_project/
 │   ├── processed/        # Cleaned FASTQ files
 │   └── reference/        # Reference genome files
 ├── results/
-│   ├── fastqc_raw/       # Quality control reports
+│   ├── quality_control/  # Quality control reports
 │   ├── alignment/        # BAM files and mapping stats
-│   └── variants/         # VCF files and annotations
+│   ├── variants/         # Raw + filtered VCF files
+│   └── annotation/       # Annotated variants and summaries
 └── logs/                 # Analysis log files
 ```
 
@@ -229,10 +232,10 @@ your_project/
 
 | File | Description | What to Check |
 |------|-------------|---------------|
-| `results/fastqc_raw/*.html` | Quality control reports | Read quality, contamination |
-| `results/alignment/*_stats.txt` | Mapping statistics | Mapping rate (should be >85%) |
-| `results/variants/*.vcf.gz` | Variant calls | Number of variants found |
-| `results/variants/*_annotated.txt` | Annotated variants | High-impact variants |
+| `results/quality_control/*.html` | Quality control reports | Read quality, contamination |
+| `results/alignment/*_alignment_stats.txt` | Mapping statistics | Mapping rate (should be >85%) |
+| `results/variants/*_filtered.vcf.gz` | Filtered variant calls | Number of variants found |
+| `results/annotation/*_high_impact.txt` | High-impact variants | Candidate variants to review |
 
 ## 🚨 Troubleshooting Common Issues
 
@@ -301,9 +304,9 @@ rm -rf temp/ results/*/temp/
 ## 🔗 Additional Resources
 
 ### Documentation
-- [Complete Analysis Workflow](documentation/complete_analysis_workflow.md) - Detailed pipeline steps
-- [Cloud Infrastructure Guide](documentation/cloud_infrastructure_guide.md) - Running on cloud platforms
-- [Environment Setup](documentation/environment_setup.md) - Advanced installation options
+- [README.md](README.md) - Project overview and pipeline architecture
+- [16GB_SYSTEM_GUIDE.md](16GB_SYSTEM_GUIDE.md) - 16GB-specific workflow and tuning advice
+- [INPUT_OUTPUT_SPECIFICATION.md](INPUT_OUTPUT_SPECIFICATION.md) - Expected files and outputs
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Common problems and solutions
 
 ### External Resources
@@ -342,4 +345,4 @@ rm -rf temp/ results/*/temp/
 
 **🎉 Congratulations!** You're now ready to start analyzing genomic data. Remember to start small with test data and gradually work up to full-scale analyses as you become more comfortable with the tools and concepts.
 
-**Questions?** Check out [TROUBLESHOOTING.md](TROUBLESHOOTING.md) or the documentation in the `documentation/` folder.
+**Questions?** Check out [TROUBLESHOOTING.md](TROUBLESHOOTING.md), [16GB_SYSTEM_GUIDE.md](16GB_SYSTEM_GUIDE.md), and [INPUT_OUTPUT_SPECIFICATION.md](INPUT_OUTPUT_SPECIFICATION.md).

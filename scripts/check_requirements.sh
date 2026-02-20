@@ -16,6 +16,9 @@ MIN_RAM_GB=16
 MIN_DISK_GB=400
 REQUIRED_TOOLS=("fastqc" "fastp" "bwa" "samtools" "bcftools" "vep")
 VERBOSE=false
+SKIP_CONDA=false
+SKIP_ENV=false
+SKIP_TOOLS=false
 
 # Colors for output
 RED='\033[0;31m'
@@ -44,6 +47,9 @@ OPTIONS:
     -e, --env ENV           Conda environment to check (default: $CONDA_ENV)
     --min-ram GB            Minimum RAM required in GB (default: $MIN_RAM_GB)
     --min-disk GB           Minimum disk space in GB (default: $MIN_DISK_GB)
+    --skip-conda            Skip conda installation check (smoke testing only)
+    --skip-env              Skip conda environment check (smoke testing only)
+    --skip-tools            Skip bioinformatics tool checks (smoke testing only)
     --verbose               Enable verbose output
     --version               Show version information
 
@@ -56,6 +62,9 @@ EXAMPLES:
 
     # Check with custom resource requirements
     $0 --min-ram 32 --min-disk 1000
+
+    # CI/local smoke check without conda/toolchain dependencies
+    $0 --min-ram 1 --min-disk 1 --skip-conda --skip-env --skip-tools
 
 REQUIREMENTS CHECKED:
     - System RAM (default: >= ${MIN_RAM_GB}GB)
@@ -72,7 +81,7 @@ OUTPUT:
 
 AUTHOR:
     WGS Analysis Pipeline
-    https://github.com/your-repo/wgs-analysis-pipeline
+    https://github.com/Hilo-Hilo/wgs-analysis-pipeline
 
 EOF
 }
@@ -105,6 +114,18 @@ parse_arguments() {
             --min-disk)
                 MIN_DISK_GB="$2"
                 shift 2
+                ;;
+            --skip-conda)
+                SKIP_CONDA=true
+                shift
+                ;;
+            --skip-env)
+                SKIP_ENV=true
+                shift
+                ;;
+            --skip-tools)
+                SKIP_TOOLS=true
+                shift
                 ;;
             --verbose)
                 VERBOSE=true
@@ -153,6 +174,16 @@ bytes_to_human() {
     fi
 }
 
+# Resolve sysctl binary for macOS in non-interactive shells
+resolve_sysctl_bin() {
+    local sysctl_bin
+    sysctl_bin=$(command -v sysctl 2>/dev/null || true)
+    if [[ -z "$sysctl_bin" && -x "/usr/sbin/sysctl" ]]; then
+        sysctl_bin="/usr/sbin/sysctl"
+    fi
+    echo "$sysctl_bin"
+}
+
 # Check system RAM
 check_system_ram() {
     print_status "INFO" "Checking system RAM..."
@@ -160,8 +191,14 @@ check_system_ram() {
     local total_ram_kb
     if [[ "$(uname)" == "Darwin" ]]; then
         # macOS
-        total_ram_kb=$(sysctl -n hw.memsize)
-        total_ram_kb=$((total_ram_kb / 1024))
+        local sysctl_bin
+        local total_ram_bytes
+        sysctl_bin=$(resolve_sysctl_bin)
+        if [[ -z "$sysctl_bin" ]] || ! total_ram_bytes=$($sysctl_bin -n hw.memsize 2>/dev/null); then
+            print_status "FAIL" "Unable to determine system RAM on macOS (sysctl not available)"
+            return 1
+        fi
+        total_ram_kb=$((total_ram_bytes / 1024))
     else
         # Linux
         total_ram_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
@@ -181,8 +218,19 @@ check_system_ram() {
     # Check available RAM
     local available_ram_kb
     if [[ "$(uname)" == "Darwin" ]]; then
-        available_ram_kb=$(vm_stat | awk '/free/ {print $3}' | sed 's/\.//')
-        available_ram_kb=$((available_ram_kb * 4))  # Convert pages to KB
+        local vm_stat_bin
+        vm_stat_bin=$(command -v vm_stat 2>/dev/null || true)
+        if [[ -z "$vm_stat_bin" && -x "/usr/bin/vm_stat" ]]; then
+            vm_stat_bin="/usr/bin/vm_stat"
+        fi
+
+        if [[ -n "$vm_stat_bin" ]]; then
+            available_ram_kb=$($vm_stat_bin | awk '/free/ {print $3}' | sed 's/\.//')
+            available_ram_kb=$((available_ram_kb * 4))  # Convert pages to KB
+        else
+            available_ram_kb=0
+            print_status "WARN" "Unable to determine available RAM on macOS (vm_stat not available)"
+        fi
     else
         available_ram_kb=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
     fi
@@ -238,6 +286,11 @@ check_conda() {
 # Check conda environment
 check_conda_environment() {
     print_status "INFO" "Checking conda environment: $CONDA_ENV"
+
+    if ! command -v conda &> /dev/null; then
+        print_status "FAIL" "Conda not found in PATH (required to check environment '$CONDA_ENV')"
+        return 1
+    fi
     
     if ! conda env list | grep -q "^$CONDA_ENV\s"; then
         print_status "FAIL" "Conda environment '$CONDA_ENV' not found"
@@ -369,8 +422,15 @@ generate_recommendations() {
     # RAM recommendations
     local total_ram_kb
     if [[ "$(uname)" == "Darwin" ]]; then
-        total_ram_kb=$(sysctl -n hw.memsize)
-        total_ram_kb=$((total_ram_kb / 1024))
+        local sysctl_bin
+        local total_ram_bytes
+        sysctl_bin=$(resolve_sysctl_bin)
+        if [[ -n "$sysctl_bin" ]] && total_ram_bytes=$($sysctl_bin -n hw.memsize 2>/dev/null); then
+            total_ram_kb=$((total_ram_bytes / 1024))
+        else
+            total_ram_kb=0
+            print_status "WARN" "Unable to determine total RAM for optimization hints"
+        fi
     else
         total_ram_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
     fi
@@ -383,7 +443,13 @@ generate_recommendations() {
     # CPU recommendations
     local cpu_cores
     if [[ "$(uname)" == "Darwin" ]]; then
-        cpu_cores=$(sysctl -n hw.ncpu)
+        local sysctl_bin
+        sysctl_bin=$(resolve_sysctl_bin)
+        if [[ -n "$sysctl_bin" ]]; then
+            cpu_cores=$($sysctl_bin -n hw.ncpu 2>/dev/null || echo "unknown")
+        else
+            cpu_cores="unknown"
+        fi
     else
         cpu_cores=$(nproc)
     fi
@@ -415,22 +481,34 @@ main() {
     local failed_checks=0
     
     # Run all checks
-    check_system_ram || ((failed_checks++))
+    check_system_ram || failed_checks=$((failed_checks + 1))
     echo ""
     
-    check_disk_space || ((failed_checks++))
+    check_disk_space || failed_checks=$((failed_checks + 1))
     echo ""
     
-    check_conda || ((failed_checks++))
+    if [[ "$SKIP_CONDA" == "true" ]]; then
+        print_status "WARN" "Skipping conda installation check (--skip-conda)"
+    else
+        check_conda || failed_checks=$((failed_checks + 1))
+    fi
     echo ""
     
-    check_conda_environment || ((failed_checks++))
+    if [[ "$SKIP_ENV" == "true" ]]; then
+        print_status "WARN" "Skipping conda environment check (--skip-env)"
+    else
+        check_conda_environment || failed_checks=$((failed_checks + 1))
+    fi
     echo ""
     
-    check_tools || ((failed_checks++))
+    if [[ "$SKIP_TOOLS" == "true" ]]; then
+        print_status "WARN" "Skipping bioinformatics tool checks (--skip-tools)"
+    else
+        check_tools || failed_checks=$((failed_checks + 1))
+    fi
     echo ""
     
-    check_file_permissions || ((failed_checks++))
+    check_file_permissions || failed_checks=$((failed_checks + 1))
     echo ""
     
     # Show resource estimates

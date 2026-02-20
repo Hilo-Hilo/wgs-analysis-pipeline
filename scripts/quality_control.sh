@@ -37,7 +37,7 @@ OPTIONS:
     -i, --input-dir DIR     Input directory containing FASTQ files (default: $RAW_DATA_DIR)
     -o, --output-dir DIR    Output directory for results (default: $OUTPUT_DIR)
     -t, --threads NUM       Number of threads to use (default: $THREADS)
-    -e, --env ENV           Conda environment name (default: $CONDA_ENV)
+    -e, --env ENV           Environment label for logs (default: $CONDA_ENV)
     -l, --log-dir DIR       Log directory (default: $LOG_DIR)
     --dry-run               Show what would be done without executing
     --force                 Overwrite existing output files
@@ -61,7 +61,7 @@ EXAMPLES:
     $0 --force --verbose
 
 REQUIREMENTS:
-    - Conda environment '$CONDA_ENV' with FastQC installed
+    - FastQC available in PATH
     - FASTQ files (.fq.gz or .fastq.gz) in input directory
     - Sufficient disk space for output files
 
@@ -72,7 +72,7 @@ OUTPUT:
 
 AUTHOR:
     WGS Analysis Pipeline
-    https://github.com/your-repo/wgs-analysis-pipeline
+    https://github.com/Hilo-Hilo/wgs-analysis-pipeline
 
 EOF
 }
@@ -205,20 +205,12 @@ validate_parameters() {
 check_prerequisites() {
     log "Checking prerequisites..."
     
-    # Check conda environment
-    if [[ "$CONDA_DEFAULT_ENV" != "$CONDA_ENV" ]]; then
-        error "Please activate conda environment first:"
-        echo "  conda activate $CONDA_ENV"
-        echo ""
-        echo "If the environment doesn't exist, create it with:"
-        echo "  conda create -n $CONDA_ENV -c bioconda fastqc"
-        exit 1
-    fi
-    
-    # Check FastQC installation
+    # Check FastQC installation directly (portable across conda/docker/system installs)
     if ! command -v fastqc &> /dev/null; then
         error "FastQC not found in PATH."
-        echo "Install FastQC with: conda install -c bioconda fastqc"
+        echo "Install FastQC (for example):"
+        echo "  conda install -c bioconda fastqc"
+        echo "Or ensure your environment/container PATH includes fastqc."
         exit 1
     fi
     
@@ -513,7 +505,7 @@ main() {
         show_progress "$current" "${#fastq_files[@]}" "Processing $(basename "$file")"
         
         if ! run_fastqc "$file"; then
-            ((failed_files++))
+            failed_files=$((failed_files + 1))
             warning "Failed to process: $file"
         fi
     done

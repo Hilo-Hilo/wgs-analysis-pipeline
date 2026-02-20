@@ -13,6 +13,9 @@ SCRIPT_NAME="variant_calling.sh"
 # Load 16GB optimized configuration
 source config/default.conf
 
+# Track CLI overrides explicitly
+CLI_SAMPLE_ID=""
+
 # Help function
 show_help() {
     cat << EOF
@@ -105,6 +108,7 @@ parse_arguments() {
                 shift 2
                 ;;
             -s|--sample-id)
+                CLI_SAMPLE_ID="$2"
                 SAMPLE_ID="$2"
                 shift 2
                 ;;
@@ -162,7 +166,11 @@ info() {
 set_defaults() {
     OUTPUT_DIR="${OUTPUT_DIR:-results/variants}"
     REFERENCE_GENOME="${REFERENCE_GENOME:-${GRCH38_REFERENCE}}"
-    SAMPLE_ID="${SAMPLE_ID:-LOCAL_SAMPLE}"
+    if [[ -n "${CLI_SAMPLE_ID:-}" ]]; then
+        SAMPLE_ID="$CLI_SAMPLE_ID"
+    else
+        SAMPLE_ID="${SAMPLE_ID:-LOCAL_SAMPLE}"
+    fi
     THREADS="${THREADS:-${BCFTOOLS_THREADS:-2}}"
     MIN_DEPTH="${MIN_DEPTH:-${VARIANT_MIN_DEPTH:-8}}"
     MIN_QUALITY="${MIN_QUALITY:-${VARIANT_MIN_QUALITY:-30}}"

@@ -13,6 +13,9 @@ SCRIPT_NAME="data_cleaning.sh"
 # Load 16GB optimized configuration
 source config/default.conf
 
+# Track CLI overrides explicitly
+CLI_SAMPLE_ID=""
+
 # Help function
 show_help() {
     cat << EOF
@@ -99,6 +102,7 @@ parse_arguments() {
                 shift 2
                 ;;
             -s|--sample-id)
+                CLI_SAMPLE_ID="$2"
                 SAMPLE_ID="$2"
                 shift 2
                 ;;
@@ -156,7 +160,11 @@ info() {
 set_defaults() {
     INPUT_DIR="${INPUT_DIR:-${RAW_DATA_DIR}}"
     OUTPUT_DIR="${OUTPUT_DIR:-${PROCESSED_DATA_DIR}}"
-    SAMPLE_ID="${SAMPLE_ID:-LOCAL_SAMPLE}"
+    if [[ -n "${CLI_SAMPLE_ID:-}" ]]; then
+        SAMPLE_ID="$CLI_SAMPLE_ID"
+    else
+        SAMPLE_ID="${SAMPLE_ID:-LOCAL_SAMPLE}"
+    fi
     THREADS="${THREADS:-${FASTP_THREADS:-4}}"
     MIN_LENGTH="${MIN_LENGTH:-${FASTP_MIN_LENGTH:-75}}"
     QUALITY_THRESHOLD="${QUALITY_THRESHOLD:-${FASTP_QUALITY_THRESHOLD:-25}}"

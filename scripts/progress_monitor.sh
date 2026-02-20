@@ -113,7 +113,7 @@ complete_step() {
     
     if [[ "$success" == "true" ]]; then
         STEP_STATUS["$step_name"]="COMPLETED"
-        ((COMPLETED_STEPS++))
+        COMPLETED_STEPS=$((COMPLETED_STEPS + 1))
         log_message "STEP_COMPLETE" "$step_name completed in $(format_duration $duration)"
         show_step_complete "$step_name" "$duration"
     else
@@ -164,14 +164,18 @@ show_overall_progress() {
     printf "${BOLD}${PURPLE}Overall Progress:${NC}\n"
     show_progress_bar $COMPLETED_STEPS $TOTAL_STEPS "Pipeline"
     
-    local elapsed=$(($(date +%s) - PIPELINE_START_TIME))
+    local now_epoch
+    now_epoch=$(date +%s)
+    local elapsed=$((now_epoch - PIPELINE_START_TIME))
     printf "${CYAN}Elapsed Time:${NC} $(format_duration $elapsed)\n"
     
     if [[ $COMPLETED_STEPS -gt 0 && $COMPLETED_STEPS -lt $TOTAL_STEPS ]]; then
         local avg_step_time=$((elapsed / COMPLETED_STEPS))
         local remaining_time=$(((TOTAL_STEPS - COMPLETED_STEPS) * avg_step_time))
         printf "${CYAN}Estimated Remaining:${NC} $(format_duration $remaining_time)\n"
-        printf "${CYAN}Estimated Completion:${NC} $(date -d "+${remaining_time} seconds" '+%Y-%m-%d %H:%M:%S')\n"
+
+        local eta_epoch=$((now_epoch + remaining_time))
+        printf "${CYAN}Estimated Completion:${NC} $(format_epoch "$eta_epoch")\n"
     fi
     echo
 }
@@ -211,14 +215,19 @@ start_resource_monitoring() {
     
     {
         while true; do
-            local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-            local cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | sed 's/%us,//' || echo "0")
-            local memory_info=$(free -m | awk 'NR==2{printf "%.1f,%.1f", $3,$2}' || echo "0,0")
-            local disk_available=$(df -BG . | awk 'NR==2 {print $4}' | sed 's/G//' || echo "0")
-            local load_avg=$(uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | sed 's/,//' || echo "0")
-            
+            local timestamp
+            timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+            local cpu_usage
+            cpu_usage=$(get_cpu_usage)
+            local memory_info
+            memory_info=$(get_memory_usage)
+            local disk_available
+            disk_available=$(get_disk_available_gb)
+            local load_avg
+            load_avg=$(get_load_avg)
+
             echo "$timestamp,$cpu_usage,$memory_info,$disk_available,$load_avg" >> "$RESOURCE_LOG"
-            sleep $MONITOR_INTERVAL
+            sleep "$MONITOR_INTERVAL"
         done
     } &
     
@@ -261,6 +270,80 @@ format_duration() {
         local seconds=$((duration % 60))
         echo "${hours}h ${minutes}m ${seconds}s"
     fi
+}
+
+# Format epoch timestamp in a cross-platform way.
+format_epoch() {
+    local epoch="$1"
+    if date -r "$epoch" '+%Y-%m-%d %H:%M:%S' >/dev/null 2>&1; then
+        date -r "$epoch" '+%Y-%m-%d %H:%M:%S'
+    elif date -d "@$epoch" '+%Y-%m-%d %H:%M:%S' >/dev/null 2>&1; then
+        date -d "@$epoch" '+%Y-%m-%d %H:%M:%S'
+    else
+        echo "${epoch}"
+    fi
+}
+
+# Collect CPU usage percentage (best effort, cross-platform).
+get_cpu_usage() {
+    if [[ "$(uname)" == "Darwin" ]]; then
+        top -l 1 | awk -F'[:,%]' '/CPU usage/ {gsub(/ /, "", $2); print $2; exit}' || echo "0"
+    else
+        top -bn1 | awk '/Cpu\(s\)/ {print $2}' | sed 's/%us,//' || echo "0"
+    fi
+}
+
+# Collect memory used MB and memory percent as "<used_mb>,<used_pct>".
+get_memory_usage() {
+    if [[ "$(uname)" == "Darwin" ]]; then
+        local vm_out
+        vm_out=$(vm_stat 2>/dev/null)
+
+        if [[ -z "$vm_out" ]]; then
+            echo "0,0"
+            return
+        fi
+
+        local page_size
+        page_size=$(echo "$vm_out" | awk -F'[()]' '/page size of/ {gsub(/[^0-9]/, "", $2); print $2; exit}')
+        page_size=${page_size:-4096}
+
+        local active wired compressed
+        active=$(echo "$vm_out" | awk '/Pages active/ {gsub(/\./, "", $3); print $3; exit}')
+        wired=$(echo "$vm_out" | awk '/Pages wired down/ {gsub(/\./, "", $4); print $4; exit}')
+        compressed=$(echo "$vm_out" | awk '/Pages occupied by compressor/ {gsub(/\./, "", $5); print $5; exit}')
+
+        active=${active:-0}
+        wired=${wired:-0}
+        compressed=${compressed:-0}
+
+        local used_pages=$((active + wired + compressed))
+        local used_mb=$((used_pages * page_size / 1024 / 1024))
+
+        local total_bytes total_mb used_pct
+        total_bytes=$(/usr/sbin/sysctl -n hw.memsize 2>/dev/null || echo 0)
+        total_mb=$((total_bytes / 1024 / 1024))
+
+        if [[ "$total_mb" -gt 0 ]]; then
+            used_pct=$(awk -v u="$used_mb" -v t="$total_mb" 'BEGIN { printf "%.1f", (u*100)/t }')
+        else
+            used_pct="0"
+        fi
+
+        echo "${used_mb},${used_pct}"
+    else
+        free -m | awk 'NR==2 { pct=($2>0)?($3*100/$2):0; printf "%.1f,%.1f", $3, pct }' || echo "0,0"
+    fi
+}
+
+# Collect available disk in GB.
+get_disk_available_gb() {
+    df -Pk . | awk 'NR==2 {printf "%d", $4/1024/1024}' || echo "0"
+}
+
+# Collect load average (1m).
+get_load_avg() {
+    uptime | awk -F'load average[s]?:' '{print $2}' | awk -F',' '{gsub(/ /, "", $1); print $1}' || echo "0"
 }
 
 # Send notification
@@ -382,11 +465,11 @@ show_resource_summary() {
     echo
     printf "${BOLD}${PURPLE}Resource Usage Summary:${NC}\n"
     
-    # Skip header line and calculate averages
-    local avg_cpu=$(tail -n +2 "$RESOURCE_LOG" | awk -F',' '{sum+=$2; count++} END {if(count>0) print sum/count; else print 0}')
-    local avg_memory_mb=$(tail -n +2 "$RESOURCE_LOG" | awk -F',' '{sum+=$3; count++} END {if(count>0) print sum/count; else print 0}')
-    local min_disk=$(tail -n +2 "$RESOURCE_LOG" | awk -F',' '{min=999999} {if($5<min) min=$5} END {print min}')
-    local max_load=$(tail -n +2 "$RESOURCE_LOG" | awk -F',' '{max=0} {if($6>max) max=$6} END {print max}')
+    # Skip header lines and calculate averages
+    local avg_cpu=$(tail -n +3 "$RESOURCE_LOG" | awk -F',' '{sum+=$2; count++} END {if(count>0) print sum/count; else print 0}')
+    local avg_memory_mb=$(tail -n +3 "$RESOURCE_LOG" | awk -F',' '{sum+=$3; count++} END {if(count>0) print sum/count; else print 0}')
+    local min_disk=$(tail -n +3 "$RESOURCE_LOG" | awk -F',' 'NR==1{min=$5} {if($5<min) min=$5} END {if(NR>0) print min; else print 0}')
+    local max_load=$(tail -n +3 "$RESOURCE_LOG" | awk -F',' '{max=0} {if($6>max) max=$6} END {print max}')
     
     printf "${CYAN}Average CPU Usage:${NC} %.1f%%\n" "$avg_cpu"
     printf "${CYAN}Average Memory Usage:${NC} %.0f MB\n" "$avg_memory_mb"

@@ -13,6 +13,9 @@ SCRIPT_NAME="alignment.sh"
 # Load 16GB optimized configuration
 source config/default.conf
 
+# Track CLI overrides explicitly
+CLI_SAMPLE_ID=""
+
 # Help function
 show_help() {
     cat << EOF
@@ -102,6 +105,7 @@ parse_arguments() {
                 shift 2
                 ;;
             -s|--sample-id)
+                CLI_SAMPLE_ID="$2"
                 SAMPLE_ID="$2"
                 shift 2
                 ;;
@@ -152,7 +156,11 @@ set_defaults() {
     INPUT_DIR="${INPUT_DIR:-${PROCESSED_DATA_DIR}}"
     REFERENCE_GENOME="${REFERENCE_GENOME:-${GRCH38_REFERENCE}}"
     OUTPUT_DIR="${OUTPUT_DIR:-results/alignment}"
-    SAMPLE_ID="${SAMPLE_ID:-LOCAL_SAMPLE}"
+    if [[ -n "${CLI_SAMPLE_ID:-}" ]]; then
+        SAMPLE_ID="$CLI_SAMPLE_ID"
+    else
+        SAMPLE_ID="${SAMPLE_ID:-LOCAL_SAMPLE}"
+    fi
     THREADS="${THREADS:-${BWA_THREADS:-4}}"
     DRY_RUN="${DRY_RUN:-false}"
     FORCE_OVERWRITE="${FORCE_OVERWRITE:-false}"
