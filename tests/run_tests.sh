@@ -285,7 +285,8 @@ run_integration_tests() {
         tests_passed=$((tests_passed + 1))
     else
         echo "  ✗ Data cleaning failed or timed out"
-        warning "    See logs/integration_clean.log"
+        warning "    Log output:"
+        cat logs/integration_clean.log 2>/dev/null | tail -30 || true
         tests_failed=$((tests_failed + 1))
     fi
 
