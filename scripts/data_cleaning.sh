@@ -153,7 +153,10 @@ warning() {
 }
 
 info() {
-    [[ "$VERBOSE" == "true" ]] && echo -e "${BLUE}[$(date '+%Y-%m-%d %H:%M:%S')] INFO:${NC} $1" | tee -a "$LOG_DIR/data_cleaning.log"
+    if [[ "$VERBOSE" == "true" ]]; then
+        echo -e "${BLUE}[$(date '+%Y-%m-%d %H:%M:%S')] INFO:${NC} $1" | tee -a "$LOG_DIR/data_cleaning.log"
+    fi
+    return 0
 }
 
 # Set default values from config
