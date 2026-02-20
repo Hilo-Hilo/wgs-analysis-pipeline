@@ -10,7 +10,7 @@ on:
     - cron: '0 2 * * 0'
 
 env:
-  PYTHON_VERSION: '3.9'
+  PYTHON_VERSION: '3.11'
   CONDA_ENV: 'wgs_analysis'
 
 jobs:
@@ -72,17 +72,15 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Setup Miniconda (cached)
+      - name: Setup Miniconda
         uses: conda-incubator/setup-miniconda@v3
         with:
           auto-update-conda: true
           activate-environment: ${{ env.CONDA_ENV }}
           environment-file: .github/conda/integration-environment.yml
-          channels: bioconda,conda-forge,defaults
-          channel-priority: strict
+          channels: conda-forge,bioconda
+          channel-priority: flexible
           use-mamba: true
-          cache-environment: true
-          cache-downloads: true
 
       - name: Verify bioinformatics toolchain
         shell: bash -el {0}
@@ -204,14 +202,16 @@ jobs:
         with:
           auto-update-conda: true
           python-version: ${{ env.PYTHON_VERSION }}
-          channels: bioconda,conda-forge,defaults
+          channels: conda-forge,bioconda
+          channel-priority: flexible
+          use-mamba: true
 
       - name: Install tools
         shell: bash -el {0}
         run: |
-          conda create -n ${{ env.CONDA_ENV }} python=${{ env.PYTHON_VERSION }}
+          mamba create -n ${{ env.CONDA_ENV }} -c conda-forge -c bioconda \
+            python=${{ env.PYTHON_VERSION }} fastqc fastp -y
           conda activate ${{ env.CONDA_ENV }}
-          conda install -c bioconda -c conda-forge fastqc fastp -y
 
       - name: Run performance benchmark
         shell: bash -el {0}

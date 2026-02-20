@@ -1,12 +1,11 @@
 name: wgs_analysis
 channels:
-  - bioconda
   - conda-forge
-  - defaults
+  - bioconda
 dependencies:
-  - python=3.9
-  - fastqc=0.12.1
-  - fastp=0.23.4
-  - bwa=0.7.17
-  - samtools=1.17
-  - bcftools=1.17
+  - python=3.11
+  - fastqc
+  - fastp
+  - bwa
+  - samtools
+  - bcftools
