@@ -223,7 +223,7 @@ check_prerequisites() {
     
     # Find FASTQ files
     local fastq_files
-    fastq_files=($(find "$RAW_DATA_DIR" -name "*.fq.gz" -o -name "*.fastq.gz" 2>/dev/null))
+    fastq_files=($(find "$RAW_DATA_DIR" \( -name "*.fq.gz" -o -name "*.fastq.gz" \) 2>/dev/null))
     
     if [[ ${#fastq_files[@]} -eq 0 ]]; then
         error "No FASTQ files found in: $RAW_DATA_DIR"
@@ -488,7 +488,7 @@ main() {
     
     # Find all FASTQ files in input directory
     local fastq_files
-    fastq_files=($(find "$RAW_DATA_DIR" -name "*.fq.gz" -o -name "*.fastq.gz" 2>/dev/null))
+    fastq_files=($(find "$RAW_DATA_DIR" \( -name "*.fq.gz" -o -name "*.fastq.gz" \) 2>/dev/null))
     
     if [[ ${#fastq_files[@]} -eq 0 ]]; then
         error "No FASTQ files found to process"

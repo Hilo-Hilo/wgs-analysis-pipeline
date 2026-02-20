@@ -172,8 +172,8 @@ detect_input_files() {
     if [[ -z "$CLEANED_R1" && -z "$CLEANED_R2" ]]; then
         info "Auto-detecting cleaned FASTQ files in: $INPUT_DIR"
         
-        local r1_files=($(find "$INPUT_DIR" -name "*_clean_R1.fq.gz" -o -name "*_clean_R1.fastq.gz" 2>/dev/null || true))
-        local r2_files=($(find "$INPUT_DIR" -name "*_clean_R2.fq.gz" -o -name "*_clean_R2.fastq.gz" 2>/dev/null || true))
+        local r1_files=($(find "$INPUT_DIR" \( -name "*_clean_R1.fq.gz" -o -name "*_clean_R1.fastq.gz" \) 2>/dev/null || true))
+        local r2_files=($(find "$INPUT_DIR" \( -name "*_clean_R2.fq.gz" -o -name "*_clean_R2.fastq.gz" \) 2>/dev/null || true))
         
         if [[ ${#r1_files[@]} -eq 0 ]]; then
             error "No cleaned FASTQ files found in: $INPUT_DIR"

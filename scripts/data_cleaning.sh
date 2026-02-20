@@ -177,9 +177,9 @@ set_defaults() {
 detect_input_files() {
     info "Detecting FASTQ files in: $INPUT_DIR"
     
-    # Find paired-end FASTQ files
-    local r1_files=($(find "$INPUT_DIR" -name "*_R1.fastq.gz" -o -name "*_1.fq.gz" 2>/dev/null || true))
-    local r2_files=($(find "$INPUT_DIR" -name "*_R2.fastq.gz" -o -name "*_2.fq.gz" 2>/dev/null || true))
+    # Find paired-end FASTQ files (parentheses required for correct -o behavior)
+    local r1_files=($(find "$INPUT_DIR" \( -name "*_R1.fastq.gz" -o -name "*_1.fq.gz" \) 2>/dev/null || true))
+    local r2_files=($(find "$INPUT_DIR" \( -name "*_R2.fastq.gz" -o -name "*_2.fq.gz" \) 2>/dev/null || true))
     
     if [[ ${#r1_files[@]} -eq 0 ]]; then
         error "No R1 FASTQ files found in: $INPUT_DIR"
@@ -267,8 +267,10 @@ run_fastp_cleaning() {
     
     local cleaned_r1="$OUTPUT_DIR/${SAMPLE_ID}_clean_R1.fq.gz"
     local cleaned_r2="$OUTPUT_DIR/${SAMPLE_ID}_clean_R2.fq.gz"
-    local report_html="results/${SAMPLE_ID}_cleaning_report.html"
-    local report_json="results/${SAMPLE_ID}_cleaning_report.json"
+    local report_dir="${OUTPUT_DIR}/reports"
+    mkdir -p "$report_dir"
+    local report_html="${report_dir}/${SAMPLE_ID}_cleaning_report.html"
+    local report_json="${report_dir}/${SAMPLE_ID}_cleaning_report.json"
     
     if [[ -f "$cleaned_r1" && -f "$cleaned_r2" && "$FORCE_OVERWRITE" != "true" ]]; then
         warning "Cleaned reads already exist:"
@@ -315,7 +317,6 @@ run_fastp_cleaning() {
     fastp_cmd+=" --cut_tail_mean_quality $QUALITY_THRESHOLD"
     
     # Memory conservation
-    fastp_cmd+=" --disable_length_filtering"  # We handle length separately
     fastp_cmd+=" --overrepresentation_analysis"
     
     if eval "$fastp_cmd" 2>>"$LOG_DIR/data_cleaning.log"; then
