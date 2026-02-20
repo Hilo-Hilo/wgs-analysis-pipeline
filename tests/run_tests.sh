@@ -264,15 +264,15 @@ run_integration_tests() {
     if "$ROOT_DIR/scripts/quality_control.sh" \
         --input-dir data/raw \
         --output-dir results/quality_control \
-        --sample-id test_sample \
-        --threads 1 > /dev/null 2>&1; then
+        --threads 1 > logs/integration_qc.log 2>&1; then
         echo "  ✓ Quality control completed"
         tests_passed=$((tests_passed + 1))
     else
         echo "  ✗ Quality control failed"
+        warning "    See logs/integration_qc.log"
         tests_failed=$((tests_failed + 1))
     fi
-    
+
     # Test 2: Data cleaning
     info "Testing data cleaning step..."
     if timeout 120 "$ROOT_DIR/scripts/data_cleaning.sh" \
@@ -280,18 +280,20 @@ run_integration_tests() {
         --output-dir data/processed \
         --sample-id test_sample \
         --threads 1 \
-        --min-length 50 > /dev/null 2>&1; then
+        --min-length 50 > logs/integration_clean.log 2>&1; then
         echo "  ✓ Data cleaning completed"
         tests_passed=$((tests_passed + 1))
     else
         echo "  ✗ Data cleaning failed or timed out"
+        warning "    See logs/integration_clean.log"
         tests_failed=$((tests_failed + 1))
     fi
-    
+
     # Test 3: Check output files exist
     info "Testing output file generation..."
     local output_files=(
-        "results/quality_control/test_sample_fastqc.html"
+        "results/quality_control/test_sample_R1_fastqc.html"
+        "results/quality_control/test_sample_R2_fastqc.html"
         "data/processed/test_sample_clean_R1.fq.gz"
         "data/processed/test_sample_clean_R2.fq.gz"
     )
