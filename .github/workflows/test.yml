@@ -228,8 +228,7 @@ jobs:
           scripts/quality_control.sh \
             --input-dir benchmark_data \
             --output-dir benchmark_results \
-            --threads 2 \
-            --sample-id benchmark
+            --threads 2
           time_end=$(date +%s)
 
           duration=$((time_end - time_start))
