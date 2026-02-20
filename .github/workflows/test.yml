@@ -221,6 +221,7 @@ jobs:
           conda activate ${{ env.CONDA_ENV }}
 
           echo "⚡ Running performance benchmark..."
+          mkdir -p logs
           python3 tests/generate_sample_data.py --num-reads 10000 --output-dir benchmark_data
 
           # Time the quality control step
