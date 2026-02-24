@@ -58,8 +58,8 @@ ENV PATH="/opt/miniconda/bin:$PATH"
 # Use mamba + flexible priority for more reliable solves in CI.
 RUN conda config --set always_yes true && \
     conda config --set channel_priority flexible && \
-    conda install -n base -c conda-forge mamba && \
-    mamba create -n wgs_analysis -c conda-forge -c bioconda \
+    conda install -n base --override-channels -c conda-forge mamba && \
+    mamba create -n wgs_analysis --override-channels -c conda-forge -c bioconda \
     python=3.11 \
     fastqc \
     fastp \
