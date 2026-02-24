@@ -301,19 +301,43 @@ run_bwa_alignment() {
     bwa_cmd+=" -R '@RG\tID:$SAMPLE_ID\tSM:$SAMPLE_ID\tPL:ILLUMINA\tLB:WGS\tPU:$SAMPLE_ID'"
     bwa_cmd+=" $REFERENCE_GENOME $CLEANED_R1 $CLEANED_R2"
     
-    local samtools_cmd="samtools sort -@ $THREADS -m 2G -o $bam_output"
-    
-    if eval "$bwa_cmd | $samtools_cmd" 2>>"$LOG_DIR/alignment.log"; then
-        log "BWA alignment and sorting completed successfully"
-        
-        # Get file size
-        local bam_size=$(du -h "$bam_output" | cut -f1)
-        log "Aligned BAM file size: $bam_size"
-        
-    else
-        error "BWA alignment failed"
-        return 1
+    # Samtools compatibility:
+    # - samtools >=1.x supports: samtools sort -@ N -m 2G -o out.bam -
+    # - samtools 0.1.x uses old syntax: samtools sort -m BYTES - prefix
+    local samtools_version
+    samtools_version=$(samtools --version 2>/dev/null | awk 'NR==1{print $2}')
+    if [[ -z "$samtools_version" ]]; then
+        samtools_version=$(samtools 2>&1 | awk '/^Version:/{print $2; exit}')
     fi
+
+    if [[ "$samtools_version" =~ ^0\. ]]; then
+        warning "Detected legacy samtools $samtools_version; using compatibility sort syntax"
+        local sort_prefix="$OUTPUT_DIR/${SAMPLE_ID}_aligned_sorted"
+
+        if eval "$bwa_cmd | samtools sort -m 2000000000 - $sort_prefix" 2>>"$LOG_DIR/alignment.log"; then
+            # Legacy samtools writes ${prefix}.bam
+            if [[ -f "${sort_prefix}.bam" ]]; then
+                mv -f "${sort_prefix}.bam" "$bam_output"
+            fi
+            log "BWA alignment and sorting completed successfully"
+        else
+            error "BWA alignment failed"
+            return 1
+        fi
+    else
+        local samtools_cmd="samtools sort -@ $THREADS -m 2G -o $bam_output -"
+
+        if eval "$bwa_cmd | $samtools_cmd" 2>>"$LOG_DIR/alignment.log"; then
+            log "BWA alignment and sorting completed successfully"
+        else
+            error "BWA alignment failed"
+            return 1
+        fi
+    fi
+
+    # Get file size
+    local bam_size=$(du -h "$bam_output" | cut -f1)
+    log "Aligned BAM file size: $bam_size"
 }
 
 # Index BAM file
