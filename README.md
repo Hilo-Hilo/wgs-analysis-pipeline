@@ -8,6 +8,8 @@ A memory-optimized whole-genome sequencing analysis pipeline for variant discove
 ## Features
 
 - End-to-end WGS workflow: QC, trimming, alignment, variant calling, annotation
+- **Automatic hardware detection**: CPU cores, RAM, and GPU availability
+- **Optimal performance mode selection**: laptop, workstation, server, or DGX
 - Optimized for 16 GB RAM with automatic resource monitoring
 - Hardware profiles for laptops, workstations, servers, and cloud instances
 - Checkpoint/resume support for long-running analyses
@@ -39,6 +41,48 @@ bash scripts/validate_deps.sh --ci-mode     # validate dependency versions
 # place paired FASTQ files in data/raw/
 bash run_pipeline.sh --sample-id MySample --input-dir data/raw --output-dir results
 ```
+
+## Hardware Auto-Detection
+
+The pipeline automatically detects available hardware and selects optimal settings:
+
+```bash
+# Show detected hardware without running
+bash run_pipeline.sh --show-hardware
+
+# Run with auto-detected settings (default)
+bash run_pipeline.sh --sample-id MySample --input-dir data/raw
+
+# Override specific settings while keeping other auto-detection
+bash run_pipeline.sh --sample-id MySample --threads 8  # Manual thread count
+bash run_pipeline.sh --sample-id MySample --no-gpu     # Force CPU even if GPUs available
+
+# Disable auto-detection entirely (use config defaults)
+bash run_pipeline.sh --sample-id MySample --no-auto
+```
+
+### Performance Mode Decision Table
+
+| Condition | Mode | Threads | GPU |
+|-----------|------|---------|-----|
+| 8+ GPUs **or** (4+ GPUs **and** 128GB+ RAM) | `dgx` | cores - 4 | ✓ (up to 4) |
+| 64GB+ RAM **and** 16+ cores | `server` | 75% of cores | if available |
+| 32GB+ RAM **and** 8+ cores **or** 1-3 GPUs | `workstation` | 50% of cores | if available |
+| Everything else | `laptop` | 2-4 | ✗ |
+
+Thread counts are also capped based on available RAM (4GB per thread for WGS workloads).
+
+### Manual Override Precedence
+
+CLI arguments always take precedence over auto-detected values:
+
+| Flag | Effect |
+|------|--------|
+| `--threads N` | Override auto-detected thread count |
+| `--use-gpu` | Force GPU mode (requires nvidia-smi + pbrun) |
+| `--no-gpu` | Force CPU mode even if GPUs available |
+| `--gpu-count N` | Override auto-detected GPU count |
+| `--no-auto` | Disable all auto-detection (use config defaults) |
 
 ## DGX GPU Alignment (Optional)
 
@@ -128,8 +172,9 @@ CI runs automatically via GitHub Actions (`.github/workflows/test.yml`).
 .
 ├── run_pipeline.sh              # Main entry point
 ├── scripts/
-│   ├── check_requirements.sh    # System requirements validation
+│   ├── check_requirements.sh    # Dependency/system validation
 │   ├── validate_deps.sh         # Dependency version validation
+│   ├── detect_hardware.sh       # CPU/RAM/GPU auto-detection
 │   ├── quality_control.sh       # FastQC
 │   ├── data_cleaning.sh         # fastp trimming
 │   ├── alignment.sh             # CPU BWA or GPU Parabricks
