@@ -5,6 +5,14 @@
 
 set -e
 
+# Require Bash 4+ (associative arrays used by progress monitor)
+if [[ -z "${BASH_VERSINFO:-}" || "${BASH_VERSINFO[0]}" -lt 4 ]]; then
+    echo "❌ run_pipeline.sh requires Bash 4 or newer."
+    echo "   Detected: ${BASH_VERSION:-unknown}"
+    echo "   On macOS, install newer bash (e.g. via Homebrew) and run with that binary."
+    exit 1
+fi
+
 # Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

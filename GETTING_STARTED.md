@@ -24,8 +24,11 @@ conda activate wgs_analysis
 
 ```bash
 conda create -n wgs_analysis -c bioconda -c conda-forge \
-    python=3.11 fastqc fastp bwa samtools bcftools ensembl-vep -y
+    python=3.11 fastqc fastp bwa samtools bcftools -y
 conda activate wgs_analysis
+
+# Optional (annotation step only)
+# conda install -n wgs_analysis -c bioconda ensembl-vep
 ```
 
 ## Prepare Your Data
@@ -65,10 +68,22 @@ conda activate wgs_analysis
 ### Or all at once
 
 ```bash
-bash run_pipeline.sh -1 data/raw/R1.fastq.gz -2 data/raw/R2.fastq.gz
+bash run_pipeline.sh --sample-id MySample --input-dir data/raw --output-dir results
 ```
 
 Every script accepts `--help`, `--dry-run`, `--threads N`, and `--verbose`.
+
+### DGX GPU alignment (optional)
+
+```bash
+./scripts/alignment.sh \
+  --input-dir data/processed \
+  --reference data/reference/GRCh38/GRCh38_latest_genomic.fna \
+  --output-dir results/alignment \
+  --sample-id MySample \
+  --threads 32 \
+  --use-gpu --gpu-aligner parabricks --gpu-count 1
+```
 
 ## Reference Genome
 

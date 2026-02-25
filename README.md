@@ -34,7 +34,7 @@ git clone https://github.com/Hilo-Hilo/wgs-analysis-pipeline.git
 cd wgs-analysis-pipeline
 bash scripts/check_requirements.sh          # verify dependencies
 # place paired FASTQ files in data/raw/
-bash run_pipeline.sh -1 data/raw/R1.fastq.gz -2 data/raw/R2.fastq.gz
+bash run_pipeline.sh --sample-id MySample --input-dir data/raw --output-dir results
 ```
 
 ## DGX GPU Alignment (Optional)
@@ -80,7 +80,7 @@ The pipeline reads settings from `config/default.conf`. Key parameters:
 | `KEEP_INTERMEDIATE_FILES` | false | Retain intermediate BAMs/VCFs |
 | `ENABLE_CHECKPOINTING` | true | Allow resume after interruption |
 
-Hardware-specific profiles are available in `config/profiles/`:
+Hardware-specific presets are provided in `config/profiles/` for reference:
 
 | Profile | File | Target |
 |---------|------|--------|
@@ -89,12 +89,7 @@ Hardware-specific profiles are available in `config/profiles/`:
 | Server | `config/profiles/server.conf` | 128+ GB, 16+ cores |
 | Cloud | `config/profiles/cloud.conf` | Cloud VMs (AWS/GCP) |
 
-Apply a profile:
-
-```bash
-bash run_pipeline.sh --profile config/profiles/workstation.conf \
-  -1 data/raw/R1.fastq.gz -2 data/raw/R2.fastq.gz
-```
+The pipeline entrypoint currently uses `config/default.conf` + CLI overrides.
 
 ## Docker
 
@@ -144,8 +139,6 @@ CI runs automatically via GitHub Actions (`.github/workflows/test.yml`).
 ├── config/
 │   ├── default.conf             # Default configuration
 │   └── profiles/                # Hardware-specific profiles
-├── analysis/
-│   └── comprehensive_analysis.py
 ├── tests/
 │   ├── run_tests.sh             # Test suite
 │   └── generate_sample_data.py  # Synthetic data generator
