@@ -32,6 +32,18 @@ ls data/raw/           # check actual filenames
 python3 tests/generate_sample_data.py --output-dir data/raw
 ```
 
+### Docker build fails on conda channel/network errors
+
+The Dockerfile now retries `conda/mamba` environment creation with exponential backoff (4 attempts). If your network is unstable, retrying the build usually succeeds:
+
+```bash
+docker build --build-arg MINICONDA_INSTALLER=Miniconda3-latest-Linux-aarch64.sh -t wgs-pipeline:latest .
+```
+
+If failures persist, verify DNS/network egress to `conda.anaconda.org`.
+
+Note: the base Docker image intentionally excludes `vep` to avoid pulling legacy/incompatible toolchains on ARM. `vep` is optional and only needed for the annotation step.
+
 ### Out of memory / process killed
 
 Reduce threads (each thread uses more RAM):

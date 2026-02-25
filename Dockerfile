@@ -58,17 +58,41 @@ RUN wget "https://repo.anaconda.com/miniconda/${MINICONDA_INSTALLER}" -O minicon
 ENV PATH="/opt/miniconda/bin:$PATH"
 
 # Create conda environment with bioinformatics tools
-# Use mamba + flexible priority for more reliable solves in CI.
-RUN conda config --set always_yes true && \
-    conda config --set channel_priority flexible && \
-    conda install -n base --override-channels -c conda-forge mamba && \
-    mamba create -n wgs_analysis --override-channels -c conda-forge -c bioconda \
-    python=3.11 \
-    fastqc \
-    fastp \
-    bwa \
-    'bcftools>=1.18' && \
-    conda clean -ya
+# Use mamba + retry/backoff for transient channel/DNS failures in CI.
+RUN bash -lc 'set -euo pipefail; \
+    retry_with_backoff() { \
+      local max_attempts="$1"; \
+      local delay_seconds="$2"; \
+      shift 2; \
+      local attempt=1; \
+      local exit_code=0; \
+      while true; do \
+        if "$@"; then \
+          return 0; \
+        else \
+          exit_code="$?"; \
+        fi; \
+        if [ "$attempt" -ge "$max_attempts" ]; then \
+          echo "ERROR: command failed after ${max_attempts} attempts: $*" >&2; \
+          return "$exit_code"; \
+        fi; \
+        echo "WARN: command failed (attempt ${attempt}/${max_attempts}, exit ${exit_code}): $*" >&2; \
+        echo "Retrying in ${delay_seconds}s..." >&2; \
+        sleep "$delay_seconds"; \
+        attempt=$((attempt + 1)); \
+        delay_seconds=$((delay_seconds * 2)); \
+      done; \
+    }; \
+    conda config --set always_yes true; \
+    conda config --set channel_priority flexible; \
+    retry_with_backoff 4 5 conda install -n base --override-channels -c conda-forge mamba; \
+    retry_with_backoff 4 5 mamba create -n wgs_analysis --override-channels -c conda-forge -c bioconda \
+      python=3.11 \
+      fastqc \
+      fastp \
+      bwa \
+      "bcftools>=1.18"; \
+    conda clean -ya'
 
 # Ensure tools from the analysis environment are on PATH
 ENV PATH="/opt/miniconda/envs/wgs_analysis/bin:$PATH"
