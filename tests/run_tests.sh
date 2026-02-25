@@ -156,6 +156,220 @@ EOF
     info "Generated test FASTQ files: $(du -h $output_r1 $output_r2)"
 }
 
+# Create deterministic mock tools for edge-case unit tests
+create_mock_tools() {
+    local mock_bin="$TEMP_TEST_DIR/mock_bin"
+    mkdir -p "$mock_bin"
+
+    cat > "$mock_bin/fastqc" << 'EOF'
+#!/bin/bash
+set -e
+
+outdir=""
+input=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --outdir)
+            outdir="$2"
+            shift 2
+            ;;
+        --threads)
+            shift 2
+            ;;
+        --extract|--quiet)
+            shift
+            ;;
+        *)
+            input="$1"
+            shift
+            ;;
+    esac
+done
+
+if [[ "${FASTQC_MOCK_MODE:-ok}" == "bad_exit" ]]; then
+    exit 1
+fi
+
+if [[ -z "$outdir" || -z "$input" ]]; then
+    exit 1
+fi
+
+base=$(basename "$input")
+base="${base%.fq.gz}"
+base="${base%.fastq.gz}"
+
+if [[ "${FASTQC_MOCK_MODE:-ok}" == "missing_output" ]]; then
+    exit 0
+fi
+
+mkdir -p "$outdir/${base}_fastqc"
+
+if [[ "${FASTQC_MOCK_MODE:-ok}" == "low_quality" ]]; then
+    cat > "$outdir/${base}_fastqc/fastqc_data.txt" << 'DATA'
+Total Sequences	10000
+Sequences flagged as poor quality	8500
+Sequence length	100
+%GC	45
+>>Per base sequence quality	FAIL
+>>Per sequence quality scores	FAIL
+>>Per base sequence content	FAIL
+>>Per sequence GC content	FAIL
+>>Adapter Content	FAIL
+>>Kmer Content	FAIL
+DATA
+else
+    cat > "$outdir/${base}_fastqc/fastqc_data.txt" << 'DATA'
+Total Sequences	10000
+Sequences flagged as poor quality	10
+Sequence length	100
+%GC	45
+>>Per base sequence quality	PASS
+>>Per sequence quality scores	PASS
+>>Per base sequence content	PASS
+>>Per sequence GC content	PASS
+>>Adapter Content	WARN
+>>Kmer Content	PASS
+DATA
+fi
+
+cat > "$outdir/${base}_fastqc.html" << HTML
+<html><body>mock fastqc report</body></html>
+HTML
+EOF
+
+    cat > "$mock_bin/fastp" << 'EOF'
+#!/bin/bash
+set -e
+
+input_r1=""
+input_r2=""
+out_r1=""
+out_r2=""
+html=""
+json=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -i)
+            input_r1="$2"
+            shift 2
+            ;;
+        -I)
+            input_r2="$2"
+            shift 2
+            ;;
+        -o)
+            out_r1="$2"
+            shift 2
+            ;;
+        -O)
+            out_r2="$2"
+            shift 2
+            ;;
+        --html)
+            html="$2"
+            shift 2
+            ;;
+        --json)
+            json="$2"
+            shift 2
+            ;;
+        --thread|--qualified_quality_phred|--unqualified_percent_limit|--length_required|--cut_tail_window_size|--cut_tail_mean_quality)
+            shift 2
+            ;;
+        --detect_adapter_for_pe|--correction|--cut_tail|--overrepresentation_analysis)
+            shift
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+mode="${FASTP_MOCK_MODE:-normal}"
+
+if [[ "$mode" == "bad_exit" ]]; then
+    exit 1
+fi
+
+if [[ "$mode" != "missing_output" ]]; then
+    mkdir -p "$(dirname "$out_r1")" "$(dirname "$out_r2")" "$(dirname "$html")" "$(dirname "$json")"
+    cp "$input_r1" "$out_r1"
+    cp "$input_r2" "$out_r2"
+    cat > "$html" << HTML
+<html><body>mock fastp report</body></html>
+HTML
+fi
+
+before=10000
+after=8500
+q30_before=0.85
+q30_after=0.90
+
+if [[ "$mode" == "overtrim" ]]; then
+    after=200
+    q30_before=0.25
+    q30_after=0.60
+elif [[ "$mode" == "zero_reads" ]]; then
+    after=0
+    q30_before=0.20
+    q30_after=0.10
+elif [[ "$mode" == "low_quality_ok" ]]; then
+    after=7000
+    q30_before=0.10
+    q30_after=0.55
+elif [[ "$mode" == "missing_output" ]]; then
+    # Simulate tool claiming success but producing no files
+    exit 0
+fi
+
+cat > "$json" << JSON
+{
+  "summary": {
+    "before_filtering": {
+      "total_reads": $before,
+      "q30_rate": $q30_before
+    },
+    "after_filtering": {
+      "total_reads": $after,
+      "q30_rate": $q30_after
+    }
+  }
+}
+JSON
+
+exit 0
+EOF
+
+    chmod +x "$mock_bin/fastqc" "$mock_bin/fastp"
+    echo "$mock_bin"
+}
+
+write_mock_fastq() {
+    local output="$1"
+    local reads="${2:-200}"
+    local length="${3:-100}"
+
+    python3 - "$output" "$reads" "$length" << 'EOF'
+import gzip
+import random
+import sys
+
+out = sys.argv[1]
+reads = int(sys.argv[2])
+length = int(sys.argv[3])
+
+bases = "ACGT"
+qual = "I" * length
+
+with gzip.open(out, "wt") as f:
+    for i in range(reads):
+        seq = "".join(random.choice(bases) for _ in range(length))
+        f.write(f"@read_{i}\n{seq}\n+\n{qual}\n")
+EOF
+}
+
 # Unit tests
 run_unit_tests() {
     log "Running unit tests..."
@@ -317,6 +531,158 @@ run_unit_tests() {
         echo "  ✗ DEPENDENCIES.md not found"
         tests_failed=$((tests_failed + 1))
     fi
+
+    # Test 6: QC detects broken pairing
+    info "Testing QC broken-pairing guardrail..."
+    local mock_bin
+    mock_bin=$(create_mock_tools)
+    local original_path="$PATH"
+    PATH="$mock_bin:$PATH"
+
+    local qc_pair_dir="$TEMP_TEST_DIR/edge_qc_pairing"
+    mkdir -p "$qc_pair_dir/raw" "$qc_pair_dir/out" "$qc_pair_dir/logs"
+    write_mock_fastq "$qc_pair_dir/raw/sampleA_R1.fastq.gz" 400 100
+
+    FASTQC_MOCK_MODE=ok "$ROOT_DIR/scripts/quality_control.sh" \
+        --input-dir "$qc_pair_dir/raw" \
+        --output-dir "$qc_pair_dir/out" \
+        --log-dir "$qc_pair_dir/logs" \
+        --threads 1 > "$qc_pair_dir/qc_pairing.log" 2>&1
+    local rc=$?
+    if [[ "$rc" -eq 12 ]]; then
+        echo "  ✓ QC rejects broken FASTQ pairing (exit 12)"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ QC broken-pairing guardrail failed (exit $rc, expected 12)"
+        tests_failed=$((tests_failed + 1))
+    fi
+
+    # Test 7: QC detects tiny FASTQ files
+    info "Testing QC tiny-file guardrail..."
+    local qc_tiny_dir="$TEMP_TEST_DIR/edge_qc_tiny"
+    mkdir -p "$qc_tiny_dir/raw" "$qc_tiny_dir/out" "$qc_tiny_dir/logs"
+    printf "tiny" | gzip -c > "$qc_tiny_dir/raw/sampleB_R1.fastq.gz"
+    printf "tiny" | gzip -c > "$qc_tiny_dir/raw/sampleB_R2.fastq.gz"
+
+    FASTQC_MOCK_MODE=ok "$ROOT_DIR/scripts/quality_control.sh" \
+        --input-dir "$qc_tiny_dir/raw" \
+        --output-dir "$qc_tiny_dir/out" \
+        --log-dir "$qc_tiny_dir/logs" \
+        --threads 1 > "$qc_tiny_dir/qc_tiny.log" 2>&1
+    rc=$?
+    if [[ "$rc" -eq 13 ]]; then
+        echo "  ✓ QC rejects tiny/truncated FASTQ files (exit 13)"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ QC tiny-file guardrail failed (exit $rc, expected 13)"
+        tests_failed=$((tests_failed + 1))
+    fi
+
+    # Test 8: QC checks for missing FastQC outputs
+    info "Testing QC missing-output guardrail..."
+    local qc_missing_dir="$TEMP_TEST_DIR/edge_qc_missing"
+    mkdir -p "$qc_missing_dir/raw" "$qc_missing_dir/out" "$qc_missing_dir/logs"
+    write_mock_fastq "$qc_missing_dir/raw/sampleC_R1.fastq.gz" 400 100
+    write_mock_fastq "$qc_missing_dir/raw/sampleC_R2.fastq.gz" 400 100
+
+    FASTQC_MOCK_MODE=missing_output "$ROOT_DIR/scripts/quality_control.sh" \
+        --input-dir "$qc_missing_dir/raw" \
+        --output-dir "$qc_missing_dir/out" \
+        --log-dir "$qc_missing_dir/logs" \
+        --threads 1 > "$qc_missing_dir/qc_missing.log" 2>&1
+    rc=$?
+    if [[ "$rc" -eq 15 ]]; then
+        echo "  ✓ QC detects missing FastQC artifacts (exit 15)"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ QC missing-output guardrail failed (exit $rc, expected 15)"
+        tests_failed=$((tests_failed + 1))
+    fi
+
+    # Test 9: Data cleaning detects broken pairing
+    info "Testing cleaning broken-pairing guardrail..."
+    local clean_pair_dir="$TEMP_TEST_DIR/edge_clean_pairing"
+    mkdir -p "$clean_pair_dir/raw" "$clean_pair_dir/out"
+    write_mock_fastq "$clean_pair_dir/raw/sampleD_R1.fastq.gz" 400 100
+
+    FASTP_MOCK_MODE=normal "$ROOT_DIR/scripts/data_cleaning.sh" \
+        --input-dir "$clean_pair_dir/raw" \
+        --output-dir "$clean_pair_dir/out" \
+        --sample-id sampleD \
+        --threads 1 > "$clean_pair_dir/clean_pairing.log" 2>&1
+    rc=$?
+    if [[ "$rc" -eq 12 ]]; then
+        echo "  ✓ Data cleaning rejects broken FASTQ pairing (exit 12)"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ Data cleaning pairing guardrail failed (exit $rc, expected 12)"
+        tests_failed=$((tests_failed + 1))
+    fi
+
+    # Test 10: Data cleaning catches over-aggressive trimming
+    info "Testing cleaning over-trimming guardrail..."
+    local clean_overtrim_dir="$TEMP_TEST_DIR/edge_clean_overtrim"
+    mkdir -p "$clean_overtrim_dir/raw" "$clean_overtrim_dir/out"
+    write_mock_fastq "$clean_overtrim_dir/raw/sampleE_R1.fastq.gz" 400 100
+    write_mock_fastq "$clean_overtrim_dir/raw/sampleE_R2.fastq.gz" 400 100
+
+    FASTP_MOCK_MODE=overtrim "$ROOT_DIR/scripts/data_cleaning.sh" \
+        --input-dir "$clean_overtrim_dir/raw" \
+        --output-dir "$clean_overtrim_dir/out" \
+        --sample-id sampleE \
+        --threads 1 > "$clean_overtrim_dir/clean_overtrim.log" 2>&1
+    rc=$?
+    if [[ "$rc" -eq 16 ]]; then
+        echo "  ✓ Data cleaning detects over-aggressive trimming (exit 16)"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ Data cleaning over-trimming guardrail failed (exit $rc, expected 16)"
+        tests_failed=$((tests_failed + 1))
+    fi
+
+    # Test 11: Data cleaning catches missing output artifacts
+    info "Testing cleaning missing-output guardrail..."
+    local clean_missing_dir="$TEMP_TEST_DIR/edge_clean_missing"
+    mkdir -p "$clean_missing_dir/raw" "$clean_missing_dir/out"
+    write_mock_fastq "$clean_missing_dir/raw/sampleF_R1.fastq.gz" 400 100
+    write_mock_fastq "$clean_missing_dir/raw/sampleF_R2.fastq.gz" 400 100
+
+    FASTP_MOCK_MODE=missing_output "$ROOT_DIR/scripts/data_cleaning.sh" \
+        --input-dir "$clean_missing_dir/raw" \
+        --output-dir "$clean_missing_dir/out" \
+        --sample-id sampleF \
+        --threads 1 > "$clean_missing_dir/clean_missing.log" 2>&1
+    rc=$?
+    if [[ "$rc" -eq 15 ]]; then
+        echo "  ✓ Data cleaning detects missing fastp artifacts (exit 15)"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ Data cleaning missing-output guardrail failed (exit $rc, expected 15)"
+        tests_failed=$((tests_failed + 1))
+    fi
+
+    # Test 12: Data cleaning succeeds on normal-quality mocked data
+    info "Testing cleaning normal-path stability..."
+    local clean_ok_dir="$TEMP_TEST_DIR/edge_clean_ok"
+    mkdir -p "$clean_ok_dir/raw" "$clean_ok_dir/out"
+    write_mock_fastq "$clean_ok_dir/raw/sampleG_R1.fastq.gz" 400 100
+    write_mock_fastq "$clean_ok_dir/raw/sampleG_R2.fastq.gz" 400 100
+
+    FASTP_MOCK_MODE=normal "$ROOT_DIR/scripts/data_cleaning.sh" \
+        --input-dir "$clean_ok_dir/raw" \
+        --output-dir "$clean_ok_dir/out" \
+        --sample-id sampleG \
+        --threads 1 > "$clean_ok_dir/clean_ok.log" 2>&1
+    rc=$?
+    if [[ "$rc" -eq 0 && -f "$clean_ok_dir/out/sampleG_clean_R1.fq.gz" && -f "$clean_ok_dir/out/sampleG_clean_R2.fq.gz" ]]; then
+        echo "  ✓ Data cleaning normal path remains stable"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ Data cleaning normal path failed (exit $rc)"
+        tests_failed=$((tests_failed + 1))
+    fi
+
+    PATH="$original_path"
 
     log "Unit tests completed: $tests_passed passed, $tests_failed failed"
     return $tests_failed
