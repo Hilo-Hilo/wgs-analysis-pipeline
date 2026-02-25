@@ -684,6 +684,319 @@ run_unit_tests() {
 
     PATH="$original_path"
 
+    # ========================================
+    # VEP Annotation Unit Tests
+    # ========================================
+    
+    log "Running VEP annotation unit tests..."
+    
+    # Create annotation mock tools
+    local ann_mock_bin="$TEMP_TEST_DIR/ann_mock_bin"
+    mkdir -p "$ann_mock_bin"
+    
+    # Mock bcftools that works
+    cat > "$ann_mock_bin/bcftools" << 'BCFTOOLS_MOCK'
+#!/bin/bash
+case "$1" in
+    view)
+        if [[ "$2" == "-H" ]]; then
+            # Output variant lines from mocked VCF
+            if [[ "${VCF_MOCK_EMPTY:-false}" == "true" ]]; then
+                exit 0
+            fi
+            echo "chr1	100	.	A	G	30	PASS	."
+            echo "chr1	200	.	C	T	40	PASS	."
+        elif [[ "$2" == "-h" ]]; then
+            echo "##fileformat=VCFv4.2"
+            echo "#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO"
+        fi
+        ;;
+    index)
+        touch "${@: -1}.csi"
+        ;;
+    query)
+        echo "chr1	100	A	G	GENE1|missense|MODERATE"
+        ;;
+    --version)
+        echo "bcftools 1.17"
+        ;;
+esac
+exit 0
+BCFTOOLS_MOCK
+    chmod +x "$ann_mock_bin/bcftools"
+    
+    # Mock tabix
+    cat > "$ann_mock_bin/tabix" << 'TABIX_MOCK'
+#!/bin/bash
+touch "$3.tbi" 2>/dev/null || touch "${@: -1}.tbi"
+exit 0
+TABIX_MOCK
+    chmod +x "$ann_mock_bin/tabix"
+    
+    # Test annotation-1: Script rejects invalid arguments
+    info "Testing annotation argument rejection..."
+    if "$ROOT_DIR/scripts/vep_annotation.sh" --invalid-flag > /dev/null 2>&1; then
+        echo "  ✗ vep_annotation.sh accepted invalid flag"
+        tests_failed=$((tests_failed + 1))
+    else
+        echo "  ✓ vep_annotation.sh rejects invalid flags"
+        tests_passed=$((tests_passed + 1))
+    fi
+    
+    # Test annotation-2: Help includes exit codes
+    info "Testing annotation help includes exit codes..."
+    if "$ROOT_DIR/scripts/vep_annotation.sh" --help 2>/dev/null | grep -q "EXIT CODES"; then
+        echo "  ✓ vep_annotation.sh help documents exit codes"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ vep_annotation.sh help missing exit codes"
+        tests_failed=$((tests_failed + 1))
+    fi
+    
+    # Test annotation-3: Missing VEP binary detected (exit 10)
+    info "Testing annotation detects missing VEP..."
+    local ann_novep_dir="$TEMP_TEST_DIR/ann_novep"
+    mkdir -p "$ann_novep_dir/results/variants" "$ann_novep_dir/config" "$ann_novep_dir/logs"
+    cp "$ROOT_DIR/config/default.conf" "$ann_novep_dir/config/"
+    
+    # Create a minimal valid VCF
+    cat > "$ann_novep_dir/results/variants/test_filtered.vcf" << 'MOCK_VCF'
+##fileformat=VCFv4.2
+##INFO=<ID=DP,Number=1,Type=Integer,Description="Depth">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+chr1	100	.	A	G	30	PASS	DP=20
+MOCK_VCF
+    gzip -f "$ann_novep_dir/results/variants/test_filtered.vcf"
+    
+    # Use PATH without vep to test missing binary detection
+    # Note: prepend mock path to keep system binaries available
+    (cd "$ann_novep_dir" && PATH="$ann_mock_bin:$PATH" "$ROOT_DIR/scripts/vep_annotation.sh" \
+        --input "results/variants/test_filtered.vcf.gz" \
+        --output-dir "results/annotation" \
+        --sample-id test \
+        > "novep.log" 2>&1)
+    rc=$?
+    if [[ "$rc" -eq 10 ]]; then
+        echo "  ✓ Annotation detects missing VEP binary (exit 10)"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ Annotation missing-VEP detection failed (exit $rc, expected 10)"
+        tests_failed=$((tests_failed + 1))
+    fi
+    
+    # Test annotation-4: Missing bcftools detected (exit 11)
+    info "Testing annotation detects missing bcftools..."
+    local ann_nobcf_dir="$TEMP_TEST_DIR/ann_nobcf"
+    mkdir -p "$ann_nobcf_dir/results/variants" "$ann_nobcf_dir/config" "$ann_nobcf_dir/logs"
+    cp "$ROOT_DIR/config/default.conf" "$ann_nobcf_dir/config/"
+    cp "$ann_novep_dir/results/variants/test_filtered.vcf.gz" "$ann_nobcf_dir/results/variants/"
+    
+    # Create minimal mock directory with only VEP - no bcftools
+    mkdir -p "$ann_mock_bin/nobcf_clean"
+    cat > "$ann_mock_bin/nobcf_clean/vep" << 'VEP_MOCK'
+#!/bin/bash
+echo "ensembl-vep : 110"
+exit 0
+VEP_MOCK
+    chmod +x "$ann_mock_bin/nobcf_clean/vep"
+    
+    # DO NOT create bcftools mock - we want `command -v bcftools` to fail
+    # Use a PATH that excludes where bcftools might be installed
+    (cd "$ann_nobcf_dir" && PATH="$ann_mock_bin/nobcf_clean:/usr/bin:/bin" "$ROOT_DIR/scripts/vep_annotation.sh" \
+        --input "results/variants/test_filtered.vcf.gz" \
+        --output-dir "results/annotation" \
+        --sample-id test \
+        > "nobcf.log" 2>&1)
+    rc=$?
+    if [[ "$rc" -eq 11 ]]; then
+        echo "  ✓ Annotation detects missing bcftools (exit 11)"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ Annotation missing-bcftools detection failed (exit $rc, expected 11)"
+        tests_failed=$((tests_failed + 1))
+    fi
+    
+    # Test annotation-5: Missing input VCF detected (exit 12)
+    info "Testing annotation detects missing input VCF..."
+    local ann_novcf_dir="$TEMP_TEST_DIR/ann_novcf"
+    mkdir -p "$ann_novcf_dir/results/variants" "$ann_novcf_dir/config" "$ann_novcf_dir/logs"
+    cp "$ROOT_DIR/config/default.conf" "$ann_novcf_dir/config/"
+    
+    # Create mocks for both vep and bcftools
+    mkdir -p "$ann_mock_bin/full"
+    cat > "$ann_mock_bin/full/vep" << 'VEP_MOCK'
+#!/bin/bash
+if [[ "$1" == "--version" || "$1" == "--help" ]]; then
+    echo "ensembl-vep : 110"
+    exit 0
+fi
+exit 0
+VEP_MOCK
+    chmod +x "$ann_mock_bin/full/vep"
+    cp "$ann_mock_bin/bcftools" "$ann_mock_bin/full/"
+    cp "$ann_mock_bin/tabix" "$ann_mock_bin/full/"
+    
+    (cd "$ann_novcf_dir" && PATH="$ann_mock_bin/full:$PATH" "$ROOT_DIR/scripts/vep_annotation.sh" \
+        --input "results/variants/nonexistent.vcf.gz" \
+        --output-dir "results/annotation" \
+        --sample-id test \
+        > "novcf.log" 2>&1)
+    rc=$?
+    if [[ "$rc" -eq 12 ]]; then
+        echo "  ✓ Annotation detects missing input VCF (exit 12)"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ Annotation missing-VCF detection failed (exit $rc, expected 12)"
+        tests_failed=$((tests_failed + 1))
+    fi
+    
+    # Test annotation-6: Malformed VCF detected (exit 13)
+    info "Testing annotation detects malformed VCF..."
+    local ann_badvcf_dir="$TEMP_TEST_DIR/ann_badvcf"
+    mkdir -p "$ann_badvcf_dir/results/variants" "$ann_badvcf_dir/config" "$ann_badvcf_dir/logs"
+    cp "$ROOT_DIR/config/default.conf" "$ann_badvcf_dir/config/"
+    
+    # Create a malformed VCF (not starting with ##fileformat)
+    echo "this is not a vcf file" | gzip > "$ann_badvcf_dir/results/variants/bad_filtered.vcf.gz"
+    
+    (cd "$ann_badvcf_dir" && PATH="$ann_mock_bin/full:$PATH" "$ROOT_DIR/scripts/vep_annotation.sh" \
+        --input "results/variants/bad_filtered.vcf.gz" \
+        --output-dir "results/annotation" \
+        --sample-id test \
+        > "badvcf.log" 2>&1)
+    rc=$?
+    if [[ "$rc" -eq 13 ]]; then
+        echo "  ✓ Annotation detects malformed VCF (exit 13)"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ Annotation malformed-VCF detection failed (exit $rc, expected 13)"
+        tests_failed=$((tests_failed + 1))
+    fi
+    
+    # Test annotation-7: Empty VCF detected (exit 14)
+    info "Testing annotation detects empty VCF..."
+    local ann_empty_dir="$TEMP_TEST_DIR/ann_empty"
+    mkdir -p "$ann_empty_dir/results/variants" "$ann_empty_dir/config" "$ann_empty_dir/logs"
+    cp "$ROOT_DIR/config/default.conf" "$ann_empty_dir/config/"
+    
+    # Create VCF with header but no variants
+    cat > "$ann_empty_dir/results/variants/empty_filtered.vcf" << 'EMPTY_VCF'
+##fileformat=VCFv4.2
+##INFO=<ID=DP,Number=1,Type=Integer,Description="Depth">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+EMPTY_VCF
+    gzip -f "$ann_empty_dir/results/variants/empty_filtered.vcf"
+    
+    # Use a bcftools that reports empty
+    cat > "$ann_mock_bin/full/bcftools_empty" << 'BCF_EMPTY'
+#!/bin/bash
+case "$1" in
+    view)
+        if [[ "$2" == "-H" ]]; then
+            # No output = empty VCF
+            exit 0
+        elif [[ "$2" == "-h" ]]; then
+            echo "##fileformat=VCFv4.2"
+            echo "#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO"
+        fi
+        ;;
+    --version)
+        echo "bcftools 1.17"
+        ;;
+esac
+exit 0
+BCF_EMPTY
+    chmod +x "$ann_mock_bin/full/bcftools_empty"
+    cp "$ann_mock_bin/full/bcftools" "$ann_mock_bin/full/bcftools_orig"
+    cp "$ann_mock_bin/full/bcftools_empty" "$ann_mock_bin/full/bcftools"
+    
+    (cd "$ann_empty_dir" && PATH="$ann_mock_bin/full:$PATH" "$ROOT_DIR/scripts/vep_annotation.sh" \
+        --input "results/variants/empty_filtered.vcf.gz" \
+        --output-dir "results/annotation" \
+        --sample-id test \
+        > "empty.log" 2>&1)
+    rc=$?
+    if [[ "$rc" -eq 14 ]]; then
+        echo "  ✓ Annotation detects empty VCF (exit 14)"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ Annotation empty-VCF detection failed (exit $rc, expected 14)"
+        tests_failed=$((tests_failed + 1))
+    fi
+    
+    # Restore bcftools
+    cp "$ann_mock_bin/full/bcftools_orig" "$ann_mock_bin/full/bcftools"
+    
+    # Test annotation-8: --skip-empty-check allows empty VCF
+    info "Testing annotation --skip-empty-check flag..."
+    # Ensure empty bcftools mock is in place
+    cp "$ann_mock_bin/full/bcftools_empty" "$ann_mock_bin/full/bcftools"
+    (cd "$ann_empty_dir" && PATH="$ann_mock_bin/full:$PATH" "$ROOT_DIR/scripts/vep_annotation.sh" \
+        --input "results/variants/empty_filtered.vcf.gz" \
+        --output-dir "results/annotation2" \
+        --sample-id test \
+        --skip-empty-check \
+        --dry-run \
+        > "skip_empty.log" 2>&1)
+    rc=$?
+    cp "$ann_mock_bin/full/bcftools_orig" "$ann_mock_bin/full/bcftools"
+    if [[ "$rc" -eq 0 ]]; then
+        echo "  ✓ Annotation --skip-empty-check allows empty VCF"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ Annotation --skip-empty-check failed (exit $rc, expected 0)"
+        tests_failed=$((tests_failed + 1))
+    fi
+    
+    # Test annotation-9: --validate-only mode works
+    info "Testing annotation --validate-only mode..."
+    local ann_validate_dir="$TEMP_TEST_DIR/ann_validate"
+    mkdir -p "$ann_validate_dir/results/variants" "$ann_validate_dir/config" "$ann_validate_dir/logs"
+    cp "$ROOT_DIR/config/default.conf" "$ann_validate_dir/config/"
+    cp "$ann_novep_dir/results/variants/test_filtered.vcf.gz" "$ann_validate_dir/results/variants/"
+    
+    (cd "$ann_validate_dir" && PATH="$ann_mock_bin/full:$PATH" "$ROOT_DIR/scripts/vep_annotation.sh" \
+        --input "results/variants/test_filtered.vcf.gz" \
+        --output-dir "results/annotation" \
+        --sample-id test \
+        --validate-only \
+        > "validate.log" 2>&1)
+    rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        echo "  ✓ Annotation --validate-only mode works"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ Annotation --validate-only failed (exit $rc, expected 0)"
+        tests_failed=$((tests_failed + 1))
+    fi
+    
+    # Test annotation-10: --dry-run mode works
+    info "Testing annotation --dry-run mode..."
+    (cd "$ann_validate_dir" && PATH="$ann_mock_bin/full:$PATH" "$ROOT_DIR/scripts/vep_annotation.sh" \
+        --input "results/variants/test_filtered.vcf.gz" \
+        --output-dir "results/annotation" \
+        --sample-id test \
+        --dry-run \
+        > "dryrun.log" 2>&1)
+    rc=$?
+    if [[ "$rc" -eq 0 ]] && grep -q "Would run VEP" "$ann_validate_dir/dryrun.log"; then
+        echo "  ✓ Annotation --dry-run mode works"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ Annotation --dry-run failed (exit $rc)"
+        tests_failed=$((tests_failed + 1))
+    fi
+    
+    # Test annotation-11: Version flag works
+    info "Testing annotation --version flag..."
+    if "$ROOT_DIR/scripts/vep_annotation.sh" --version 2>/dev/null | grep -q "2.1"; then
+        echo "  ✓ Annotation --version works"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ Annotation --version failed"
+        tests_failed=$((tests_failed + 1))
+    fi
+
     log "Unit tests completed: $tests_passed passed, $tests_failed failed"
     return $tests_failed
 }
