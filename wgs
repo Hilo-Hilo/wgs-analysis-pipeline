@@ -7,75 +7,92 @@ Unified entry point for WGS analysis tools.
 import argparse
 import subprocess
 import sys
-import os
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent.resolve() / "scripts"
 
-def run_script(script_name, args, unknown_args):
-    """Run a bash script with arguments"""
+
+def run_script(script_name, unknown_args):
+    """Run a bash script with arguments."""
     script_path = SCRIPT_DIR / script_name
     if not script_path.exists():
         print(f"Error: Script {script_name} not found at {script_path}")
         sys.exit(1)
-        
+
     cmd = [str(script_path)] + unknown_args
-    
-    # Map known python args to bash flags if needed, or just pass through
-    # For now, we pass all unknown_args directly to the script
-    
+
     print(f"🚀 Running {script_name}...")
     try:
         subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"❌ {script_name} failed with exit code {e.returncode}")
-        sys.exit(e.returncode)
+    except subprocess.CalledProcessError as exc:
+        print(f"❌ {script_name} failed with exit code {exc.returncode}")
+        sys.exit(exc.returncode)
 
-def cmd_check(args, unknown_args):
-    """Run system requirements check"""
-    run_script("check_requirements.sh", args, unknown_args)
 
-def cmd_run(args, unknown_args):
-    """Run the full pipeline"""
-    # The root run_pipeline.sh is in the repo root
+def run_python_script(script_name, args):
+    """Run a Python helper script with passthrough arguments."""
+    script_path = SCRIPT_DIR / script_name
+    if not script_path.exists():
+        print(f"Error: Script {script_name} not found at {script_path}")
+        sys.exit(1)
+
+    cmd = [sys.executable, str(script_path)] + args
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as exc:
+        sys.exit(exc.returncode)
+
+
+def cmd_check(unknown_args):
+    """Run system requirements check."""
+    run_script("check_requirements.sh", unknown_args)
+
+
+def cmd_run(unknown_args):
+    """Run the full pipeline."""
     root_dir = SCRIPT_DIR.parent
     pipeline_script = root_dir / "run_pipeline.sh"
-    
+
     if not pipeline_script.exists():
         print(f"Error: Pipeline script not found at {pipeline_script}")
         sys.exit(1)
-        
-    print(f"🧬 Starting WGS Pipeline...")
+
+    print("🧬 Starting WGS Pipeline...")
     try:
         subprocess.run([str(pipeline_script)] + unknown_args, check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Pipeline failed with exit code {e.returncode}")
-        sys.exit(e.returncode)
+    except subprocess.CalledProcessError as exc:
+        print(f"❌ Pipeline failed with exit code {exc.returncode}")
+        sys.exit(exc.returncode)
+
+
+def cmd_registry(unknown_args):
+    """Manage the SQLite-backed sample registry."""
+    run_python_script("sample_registry.py", unknown_args)
+
 
 def main():
     parser = argparse.ArgumentParser(description="WGS Analysis Pipeline CLI")
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
-    
-    # Check command
-    check_parser = subparsers.add_parser("check", help="Check system requirements")
-    
-    # Run command
-    run_parser = subparsers.add_parser("run", help="Run the full pipeline")
-    
-    # QC command
-    qc_parser = subparsers.add_parser("qc", help="Run quality control step only")
-    
-    # Parse known args, keep others for the scripts
+
+    subparsers.add_parser("check", help="Check system requirements")
+    subparsers.add_parser("run", help="Run the full pipeline")
+    subparsers.add_parser("qc", help="Run quality control step only")
+    subparsers.add_parser("registry", help="Manage sample registry (SQLite)")
+
+    # Parse known args, keep unknown for passthrough to underlying scripts
     args, unknown = parser.parse_known_args()
-    
+
     if args.command == "check":
-        cmd_check(args, unknown)
+        cmd_check(unknown)
     elif args.command == "run":
-        cmd_run(args, unknown)
+        cmd_run(unknown)
     elif args.command == "qc":
-        run_script("quality_control.sh", args, unknown)
+        run_script("quality_control.sh", unknown)
+    elif args.command == "registry":
+        cmd_registry(unknown)
     else:
         parser.print_help()
+
 
 if __name__ == "__main__":
     main()

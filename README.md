@@ -12,6 +12,7 @@ A memory-optimized whole-genome sequencing analysis pipeline for variant discove
 - Hardware profiles for laptops, workstations, servers, and cloud instances
 - Checkpoint/resume support for long-running analyses
 - Docker and Docker Compose support for reproducible environments
+- Optional SQLite sample registry for small family projects (`n <= 10`)
 
 ## Prerequisites
 
@@ -57,6 +58,25 @@ Notes:
 - `--use-gpu` only affects the `alignment` step.
 - Requires `nvidia-smi` and `pbrun` in PATH.
 - If GPU flags are not provided, pipeline uses CPU BWA path.
+
+## Optional Sample Registry (Small Family Projects)
+
+Track sample metadata in a local SQLite DB:
+
+```bash
+python3 wgs registry init --db .wgs/family_registry.db
+python3 wgs registry add --db .wgs/family_registry.db --sample-id child_01 --status pending
+python3 wgs registry list --db .wgs/family_registry.db --json
+```
+
+You can also wire this into pipeline runs without changing default behavior:
+
+```bash
+bash run_pipeline.sh --sample-id child_01 --input-dir data/raw --output-dir results \
+  --registry-db .wgs/family_registry.db
+```
+
+See [SAMPLE_REGISTRY.md](SAMPLE_REGISTRY.md) for schema and full workflow.
 
 ## Pipeline Stages
 
@@ -120,6 +140,13 @@ python3 tests/generate_sample_data.py
 bash tests/run_tests.sh
 ```
 
+Registry-focused checks are covered by:
+
+```bash
+bash tests/run_tests.sh --unit-only   # includes DB init/CRUD unit tests
+bash tests/run_tests.sh --quick       # includes registry smoke integration
+```
+
 CI runs automatically via GitHub Actions (`.github/workflows/test.yml`).
 
 ## Project Structure
@@ -139,13 +166,16 @@ CI runs automatically via GitHub Actions (`.github/workflows/test.yml`).
 │   ├── validate_input.sh        # Input file validation
 │   ├── manage_profiles.sh       # Profile management
 │   ├── progress_monitor.sh      # Runtime progress tracking
-│   └── resource_dashboard.py    # System resource monitor
+│   ├── resource_dashboard.py    # System resource monitor
+│   └── sample_registry.py       # SQLite sample metadata registry
 ├── config/
 │   ├── default.conf             # Default configuration
 │   └── profiles/                # Hardware-specific profiles
 ├── tests/
 │   ├── run_tests.sh             # Test suite
+│   ├── test_sample_registry.py  # Registry unit tests (init/CRUD)
 │   └── generate_sample_data.py  # Synthetic data generator
+├── SAMPLE_REGISTRY.md           # Registry schema + family workflow
 ├── DEPENDENCIES.md              # Version policy documentation
 ├── GETTING_STARTED.md
 ├── TROUBLESHOOTING.md

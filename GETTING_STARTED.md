@@ -86,6 +86,17 @@ conda activate wgs_analysis
 bash run_pipeline.sh --sample-id MySample --input-dir data/raw --output-dir results
 ```
 
+Optional: attach a SQLite sample registry during runs:
+
+```bash
+python3 wgs registry init --db .wgs/family_registry.db
+bash run_pipeline.sh \
+  --sample-id MySample \
+  --input-dir data/raw \
+  --output-dir results \
+  --registry-db .wgs/family_registry.db
+```
+
 Every script accepts `--help`, `--dry-run`, `--threads N`, and `--verbose`.
 
 ### DGX GPU alignment (optional)
@@ -146,6 +157,7 @@ logs/                # Per-step log files
 
 ## Next Steps
 
+- **Track family sample metadata**: [SAMPLE_REGISTRY.md](SAMPLE_REGISTRY.md)
 - **Tune for your hardware**: see profiles in `config/profiles/`
 - **Run in Docker**: `docker compose up --build`
 - **Troubleshoot**: [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
