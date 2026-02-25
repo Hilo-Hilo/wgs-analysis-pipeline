@@ -19,6 +19,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Source progress monitoring
 source "$SCRIPT_DIR/scripts/progress_monitor.sh"
 
+# Source hardware detection
+source "$SCRIPT_DIR/scripts/detect_hardware.sh"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -39,6 +42,13 @@ RESUME_FROM=""
 ASSUME_YES=false
 SKIP_REQUIREMENTS_CHECK=false
 
+# Auto-detection mode (enabled by default, disabled with explicit overrides)
+AUTO_DETECT=true
+DETECTED_MODE=""
+CLI_THREADS=""
+CLI_USE_GPU=""
+CLI_GPU_COUNT=""
+
 # Help function
 show_help() {
     cat << EOF
@@ -50,12 +60,15 @@ USAGE:
 OPTIONS:
     -h, --help                  Show this help message
     -s, --sample-id ID          Sample identifier (default: WGS_SAMPLE)
-    -t, --threads NUM           Number of threads (default: 4)
+    -t, --threads NUM           Number of threads (overrides auto-detection)
     -i, --input-dir DIR         Input directory with raw FASTQ files
     -o, --output-dir DIR        Output directory (default: results)
-    --use-gpu                   Use GPU alignment for alignment step
+    --use-gpu                   Use GPU alignment (auto-enabled if GPUs detected)
+    --no-gpu                    Disable GPU even if available
     --gpu-aligner NAME          GPU aligner backend (default: parabricks)
-    --gpu-count NUM             Number of GPUs for alignment step (default: 1)
+    --gpu-count NUM             Number of GPUs (overrides auto-detection)
+    --no-auto                   Disable hardware auto-detection entirely
+    --show-hardware             Show detected hardware and exit
     --resume-from STEP          Resume pipeline from specific step
     --notify-email EMAIL        Send email notifications
     --notify-slack WEBHOOK      Send Slack notifications
@@ -65,6 +78,17 @@ OPTIONS:
     --dry-run                   Show what would be done without executing
     --verbose                   Enable verbose output
 
+HARDWARE AUTO-DETECTION:
+    The pipeline automatically detects available CPU cores, RAM, and GPUs
+    to select optimal settings. Manual overrides (--threads, --use-gpu,
+    --gpu-count) take precedence over auto-detected values.
+    
+    Performance modes (auto-selected based on hardware):
+    - laptop:      2-4 threads, CPU-only (8-16GB RAM)
+    - workstation: 4-8 threads, GPU if available (32GB+ RAM, 8+ cores)
+    - server:      16-24 threads, GPU if available (64GB+ RAM, 16+ cores)
+    - dgx:         32+ threads, multi-GPU (8+ GPUs or 128GB+ RAM)
+
 PIPELINE STEPS:
     1. quality-control          FastQC analysis of raw reads
     2. data-cleaning           Adapter trimming and quality filtering
@@ -73,17 +97,29 @@ PIPELINE STEPS:
     5. annotation              VEP variant annotation
 
 EXAMPLES:
-    # Run complete pipeline
+    # Run complete pipeline (auto-detects optimal settings)
     $0 --sample-id MySample --input-dir data/raw
+
+    # Show detected hardware without running
+    $0 --show-hardware
+
+    # Override auto-detected threads
+    $0 --sample-id MySample --threads 8
+
+    # Force CPU mode even if GPUs available
+    $0 --sample-id MySample --no-gpu
+
+    # Force GPU mode with specific GPU count
+    $0 --sample-id MySample --use-gpu --gpu-count 2
+
+    # Disable auto-detection entirely (use defaults)
+    $0 --sample-id MySample --no-auto
 
     # Run with notifications
     $0 --sample-id MySample --notify-email user@example.com
 
     # Resume from alignment step
     $0 --resume-from alignment
-
-    # Use GPU alignment on DGX (alignment step only)
-    $0 --sample-id MySample --input-dir data/raw --use-gpu --gpu-aligner parabricks --gpu-count 1
 
     # Run specific steps only
     $0 --steps quality-control,data-cleaning
@@ -106,6 +142,7 @@ parse_arguments() {
                 shift 2
                 ;;
             -t|--threads)
+                CLI_THREADS="$2"
                 THREADS="$2"
                 shift 2
                 ;;
@@ -118,7 +155,13 @@ parse_arguments() {
                 shift 2
                 ;;
             --use-gpu)
+                CLI_USE_GPU="true"
                 USE_GPU=true
+                shift
+                ;;
+            --no-gpu)
+                CLI_USE_GPU="false"
+                USE_GPU=false
                 shift
                 ;;
             --gpu-aligner)
@@ -126,8 +169,17 @@ parse_arguments() {
                 shift 2
                 ;;
             --gpu-count)
+                CLI_GPU_COUNT="$2"
                 GPU_COUNT="$2"
                 shift 2
+                ;;
+            --no-auto)
+                AUTO_DETECT=false
+                shift
+                ;;
+            --show-hardware)
+                print_summary
+                exit 0
                 ;;
             --resume-from)
                 RESUME_FROM="$2"
@@ -172,19 +224,51 @@ parse_arguments() {
     done
 }
 
-# Set defaults
+# Set defaults with hardware auto-detection
 set_defaults() {
     SAMPLE_ID="${SAMPLE_ID:-$DEFAULT_SAMPLE_ID}"
-    THREADS="${THREADS:-$DEFAULT_THREADS}"
     INPUT_DIR="${INPUT_DIR:-data/raw}"
     OUTPUT_DIR="${OUTPUT_DIR:-results}"
-    USE_GPU="${USE_GPU:-$DEFAULT_USE_GPU}"
-    GPU_ALIGNER="${GPU_ALIGNER:-$DEFAULT_GPU_ALIGNER}"
-    GPU_COUNT="${GPU_COUNT:-$DEFAULT_GPU_COUNT}"
     DRY_RUN="${DRY_RUN:-false}"
     VERBOSE="${VERBOSE:-false}"
     ASSUME_YES="${ASSUME_YES:-false}"
     SKIP_REQUIREMENTS_CHECK="${SKIP_REQUIREMENTS_CHECK:-false}"
+    
+    # Apply hardware auto-detection if enabled
+    if [[ "$AUTO_DETECT" == "true" ]]; then
+        DETECTED_MODE=$(select_performance_mode)
+        
+        # Auto-detect threads (unless CLI override provided)
+        if [[ -z "$CLI_THREADS" ]]; then
+            THREADS=$(recommend_threads)
+        else
+            THREADS="$CLI_THREADS"
+        fi
+        
+        # Auto-detect GPU settings (unless CLI override provided)
+        if [[ -z "$CLI_USE_GPU" ]]; then
+            local auto_gpu_settings
+            read -r auto_use_gpu auto_aligner auto_gpu_count <<< "$(recommend_gpu_settings)"
+            USE_GPU="$auto_use_gpu"
+            GPU_ALIGNER="${GPU_ALIGNER:-$auto_aligner}"
+            if [[ -z "$CLI_GPU_COUNT" ]]; then
+                GPU_COUNT="$auto_gpu_count"
+            else
+                GPU_COUNT="$CLI_GPU_COUNT"
+            fi
+        else
+            USE_GPU="${USE_GPU:-$DEFAULT_USE_GPU}"
+            GPU_ALIGNER="${GPU_ALIGNER:-$DEFAULT_GPU_ALIGNER}"
+            GPU_COUNT="${GPU_COUNT:-$DEFAULT_GPU_COUNT}"
+        fi
+    else
+        # Auto-detection disabled: use defaults
+        DETECTED_MODE="manual"
+        THREADS="${THREADS:-$DEFAULT_THREADS}"
+        USE_GPU="${USE_GPU:-$DEFAULT_USE_GPU}"
+        GPU_ALIGNER="${GPU_ALIGNER:-$DEFAULT_GPU_ALIGNER}"
+        GPU_COUNT="${GPU_COUNT:-$DEFAULT_GPU_COUNT}"
+    fi
 }
 
 # Define pipeline steps
@@ -356,13 +440,34 @@ show_pipeline_summary() {
     echo
     echo "📋 Pipeline Configuration Summary:"
     echo "=================================="
+    
+    # Show hardware detection status
+    if [[ "$AUTO_DETECT" == "true" ]]; then
+        local hw_cores hw_ram hw_gpus
+        hw_cores=$(detect_cpu_cores)
+        hw_ram=$(detect_ram_gb)
+        hw_gpus=$(detect_gpu_count)
+        
+        printf "🔍 Hardware Detected:\n"
+        printf "   CPU: %s cores | RAM: %sGB | GPUs: %s\n" "$hw_cores" "$hw_ram" "$hw_gpus"
+        printf "   Performance Mode: %s\n" "$DETECTED_MODE"
+        
+        # Show which settings are auto vs manual
+        local thread_source="auto"
+        local gpu_source="auto"
+        [[ -n "$CLI_THREADS" ]] && thread_source="manual"
+        [[ -n "$CLI_USE_GPU" ]] && gpu_source="manual"
+        printf "   Threads: %s (%s) | GPU: %s (%s)\n" "$THREADS" "$thread_source" "$USE_GPU" "$gpu_source"
+        echo
+    fi
+    
     printf "Sample ID: %s\n" "$SAMPLE_ID"
     printf "Threads: %s\n" "$THREADS"
     printf "Input Directory: %s\n" "$INPUT_DIR"
     printf "Output Directory: %s\n" "$OUTPUT_DIR"
     printf "Steps to Run: %s\n" "${STEP_ORDER[*]}"
     if [[ "$USE_GPU" == "true" ]]; then
-        printf "Alignment Mode: GPU (%s, %s GPU)\n" "$GPU_ALIGNER" "$GPU_COUNT"
+        printf "Alignment Mode: GPU (%s, %d GPUs)\n" "$GPU_ALIGNER" "$GPU_COUNT"
     else
         printf "Alignment Mode: CPU (BWA)\n"
     fi
