@@ -255,6 +255,69 @@ run_unit_tests() {
         tests_failed=$((tests_failed + 1))
     fi
 
+    # Test 6: Dependency validator script exists and has correct syntax
+    info "Testing dependency validator syntax..."
+    if [[ -f "$ROOT_DIR/scripts/validate_deps.sh" ]]; then
+        if bash -n "$ROOT_DIR/scripts/validate_deps.sh" 2>/dev/null; then
+            echo "  ✓ Dependency validator syntax OK"
+            tests_passed=$((tests_passed + 1))
+        else
+            echo "  ✗ Dependency validator has syntax errors"
+            tests_failed=$((tests_failed + 1))
+        fi
+    else
+        echo "  ✗ Dependency validator script not found"
+        tests_failed=$((tests_failed + 1))
+    fi
+
+    # Test 7: Dependency validator help and version flags
+    info "Testing dependency validator CLI..."
+    if "$ROOT_DIR/scripts/validate_deps.sh" --help > /dev/null 2>&1; then
+        echo "  ✓ Dependency validator --help works"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ Dependency validator --help failed"
+        tests_failed=$((tests_failed + 1))
+    fi
+
+    if "$ROOT_DIR/scripts/validate_deps.sh" --version > /dev/null 2>&1; then
+        echo "  ✓ Dependency validator --version works"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ Dependency validator --version failed"
+        tests_failed=$((tests_failed + 1))
+    fi
+
+    # Test 8: Dependency validator rejects invalid arguments
+    info "Testing dependency validator argument handling..."
+    if "$ROOT_DIR/scripts/validate_deps.sh" --invalid-flag > /dev/null 2>&1; then
+        echo "  ✗ Dependency validator accepted invalid flag"
+        tests_failed=$((tests_failed + 1))
+    else
+        echo "  ✓ Dependency validator rejects invalid flags"
+        tests_passed=$((tests_passed + 1))
+    fi
+
+    # Test 9: Dependency validator CI mode (should not fail for missing optional tools)
+    info "Testing dependency validator CI mode..."
+    if "$ROOT_DIR/scripts/validate_deps.sh" --ci-mode > /dev/null 2>&1; then
+        echo "  ✓ Dependency validator CI mode works"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ Dependency validator CI mode failed"
+        tests_failed=$((tests_failed + 1))
+    fi
+
+    # Test 10: DEPENDENCIES.md exists
+    info "Testing DEPENDENCIES.md existence..."
+    if [[ -f "$ROOT_DIR/DEPENDENCIES.md" ]]; then
+        echo "  ✓ DEPENDENCIES.md exists"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ DEPENDENCIES.md not found"
+        tests_failed=$((tests_failed + 1))
+    fi
+
     log "Unit tests completed: $tests_passed passed, $tests_failed failed"
     return $tests_failed
 }

@@ -1,11 +1,21 @@
+# WGS Pipeline Integration Test Environment
+# Version ranges aligned with DEPENDENCIES.md
+# See DEPENDENCIES.md for version policy details
+
 name: wgs_analysis
+
 channels:
   - conda-forge
   - bioconda
+
 dependencies:
+  # Runtime
   - python=3.11
-  - fastqc
-  - fastp
-  - bwa
-  - samtools
-  - bcftools
+  
+  # Core bioinformatics tools (version-pinned ranges)
+  # Note: upper bounds set permissively for minor/patch updates
+  - fastqc>=0.11.9,<0.13
+  - fastp>=0.20.0
+  - bwa>=0.7.17,<0.8
+  - samtools>=1.15
+  - bcftools>=1.15

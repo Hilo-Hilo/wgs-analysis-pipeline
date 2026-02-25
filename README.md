@@ -27,12 +27,15 @@ FastQC, fastp, BWA, SAMtools, BCFtools.
 `vep` is optional (annotation step only) and may be installed separately on
 platforms where base environments prioritize toolchain stability.
 
+See [DEPENDENCIES.md](DEPENDENCIES.md) for the full version policy and supported ranges.
+
 ## Quick Start
 
 ```bash
 git clone https://github.com/Hilo-Hilo/wgs-analysis-pipeline.git
 cd wgs-analysis-pipeline
-bash scripts/check_requirements.sh          # verify dependencies
+bash scripts/check_requirements.sh          # verify system requirements
+bash scripts/validate_deps.sh --ci-mode     # validate dependency versions
 # place paired FASTQ files in data/raw/
 bash run_pipeline.sh --sample-id MySample --input-dir data/raw --output-dir results
 ```
@@ -125,7 +128,8 @@ CI runs automatically via GitHub Actions (`.github/workflows/test.yml`).
 .
 ├── run_pipeline.sh              # Main entry point
 ├── scripts/
-│   ├── check_requirements.sh    # Dependency/system validation
+│   ├── check_requirements.sh    # System requirements validation
+│   ├── validate_deps.sh         # Dependency version validation
 │   ├── quality_control.sh       # FastQC
 │   ├── data_cleaning.sh         # fastp trimming
 │   ├── alignment.sh             # CPU BWA or GPU Parabricks
@@ -142,6 +146,7 @@ CI runs automatically via GitHub Actions (`.github/workflows/test.yml`).
 ├── tests/
 │   ├── run_tests.sh             # Test suite
 │   └── generate_sample_data.py  # Synthetic data generator
+├── DEPENDENCIES.md              # Version policy documentation
 ├── GETTING_STARTED.md
 ├── TROUBLESHOOTING.md
 ├── Dockerfile

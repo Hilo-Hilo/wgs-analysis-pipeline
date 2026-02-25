@@ -6,10 +6,13 @@
 # 1. Check system readiness
 ./scripts/check_requirements.sh
 
-# 2. Generate test data
+# 2. Validate dependency versions (optional but recommended)
+./scripts/validate_deps.sh --ci-mode
+
+# 3. Generate test data
 python3 tests/generate_sample_data.py --output-dir data/raw --num-reads 2000
 
-# 3. Dry-run quality control
+# 4. Dry-run quality control
 conda activate wgs_analysis
 ./scripts/quality_control.sh --input-dir data/raw --dry-run
 ```
@@ -23,13 +26,25 @@ conda activate wgs_analysis
 ### Create the environment
 
 ```bash
+# Using version-pinned dependencies (see DEPENDENCIES.md for version policy)
 conda create -n wgs_analysis -c bioconda -c conda-forge \
-    python=3.11 fastqc fastp bwa samtools bcftools -y
+    python=3.11 \
+    "fastqc>=0.11.9" \
+    "fastp>=0.20.0" \
+    "bwa>=0.7.17" \
+    "samtools>=1.15" \
+    "bcftools>=1.15" \
+    -y
 conda activate wgs_analysis
+
+# Validate versions are within supported ranges
+./scripts/validate_deps.sh
 
 # Optional (annotation step only)
 # conda install -n wgs_analysis -c bioconda ensembl-vep
 ```
+
+> **Note**: See [DEPENDENCIES.md](DEPENDENCIES.md) for the full version policy and supported ranges.
 
 ## Prepare Your Data
 
