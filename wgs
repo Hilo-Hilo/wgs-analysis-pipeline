@@ -1,81 +1,245 @@
 #!/usr/bin/env python3
 """
 WGS Pipeline CLI Wrapper
-Unified entry point for WGS analysis tools.
+Unified entry point for WGS analysis tools with command suggestions and
+user-friendly shell compatibility checks.
 """
 
+from __future__ import annotations
+
 import argparse
+import difflib
+import os
+import shlex
+import shutil
 import subprocess
 import sys
-import os
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
-SCRIPT_DIR = Path(__file__).parent.resolve() / "scripts"
+VERSION = "1.1.0"
+ROOT_DIR = Path(__file__).parent.resolve()
+SCRIPT_DIR = ROOT_DIR / "scripts"
 
-def run_script(script_name, args, unknown_args):
-    """Run a bash script with arguments"""
-    script_path = SCRIPT_DIR / script_name
+
+def eprint(message: str) -> None:
+    print(message, file=sys.stderr)
+
+
+def suggest(value: str, candidates: List[str]) -> Optional[str]:
+    match = difflib.get_close_matches(value, candidates, n=1, cutoff=0.5)
+    return match[0] if match else None
+
+
+def bash_candidates() -> List[str]:
+    candidates: List[str] = []
+
+    env_bash = os.environ.get("WGS_BASH_BIN")
+    if env_bash:
+        candidates.append(env_bash)
+
+    candidates.extend([
+        "/opt/homebrew/bin/bash",  # Apple Silicon Homebrew
+        "/usr/local/bin/bash",     # Intel Homebrew
+    ])
+
+    found_bash = shutil.which("bash")
+    if found_bash:
+        candidates.append(found_bash)
+
+    # de-dupe while preserving order
+    deduped: List[str] = []
+    seen = set()
+    for candidate in candidates:
+        if candidate not in seen:
+            deduped.append(candidate)
+            seen.add(candidate)
+
+    return [c for c in deduped if Path(c).exists()]
+
+
+def bash_version(candidate: str) -> Optional[str]:
+    try:
+        return subprocess.check_output(
+            [candidate, "-lc", "echo ${BASH_VERSINFO[0]:-0}.${BASH_VERSINFO[1]:-0}"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except Exception:
+        return None
+
+
+def detect_bash4_plus() -> Tuple[Optional[str], Optional[str]]:
+    """Return (bash_path, version_string) if bash>=4 is available, else (None, None)."""
+    for candidate in bash_candidates():
+        version_raw = bash_version(candidate)
+        if not version_raw:
+            continue
+
+        try:
+            major = int(version_raw.split(".")[0])
+        except (ValueError, IndexError):
+            continue
+
+        if major >= 4:
+            return candidate, version_raw
+
+    return None, None
+
+
+def run_script(script_path: Path, passthrough_args: List[str], require_bash4: bool = False) -> int:
     if not script_path.exists():
-        print(f"Error: Script {script_name} not found at {script_path}")
-        sys.exit(1)
-        
-    cmd = [str(script_path)] + unknown_args
-    
-    # Map known python args to bash flags if needed, or just pass through
-    # For now, we pass all unknown_args directly to the script
-    
-    print(f"🚀 Running {script_name}...")
-    try:
-        subprocess.run(cmd, check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"❌ {script_name} failed with exit code {e.returncode}")
-        sys.exit(e.returncode)
+        eprint(f"❌ Script not found: {script_path}")
+        return 1
 
-def cmd_check(args, unknown_args):
-    """Run system requirements check"""
-    run_script("check_requirements.sh", args, unknown_args)
+    if script_path.suffix == ".sh":
+        bash_bin: Optional[str] = None
+        bash_ver: Optional[str] = None
 
-def cmd_run(args, unknown_args):
-    """Run the full pipeline"""
-    # The root run_pipeline.sh is in the repo root
-    root_dir = SCRIPT_DIR.parent
-    pipeline_script = root_dir / "run_pipeline.sh"
-    
-    if not pipeline_script.exists():
-        print(f"Error: Pipeline script not found at {pipeline_script}")
-        sys.exit(1)
-        
-    print(f"🧬 Starting WGS Pipeline...")
-    try:
-        subprocess.run([str(pipeline_script)] + unknown_args, check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Pipeline failed with exit code {e.returncode}")
-        sys.exit(e.returncode)
+        if require_bash4:
+            bash_bin, bash_ver = detect_bash4_plus()
+            if bash_bin is None:
+                eprint("❌ No compatible Bash (>=4) was found.")
+                eprint("   This command requires Bash 4+ features (associative arrays).")
+                eprint("   macOS default Bash (3.2) is too old.")
+                eprint("   Install newer Bash, for example:")
+                eprint("     brew install bash")
+                eprint("   Then run with:")
+                eprint("     WGS_BASH_BIN=/opt/homebrew/bin/bash wgs run --help")
+                return 1
+        else:
+            # Prefer modern bash when available, but gracefully fall back to default bash.
+            bash_bin, bash_ver = detect_bash4_plus()
+            if bash_bin is None:
+                for candidate in bash_candidates():
+                    maybe_ver = bash_version(candidate)
+                    if maybe_ver:
+                        bash_bin, bash_ver = candidate, maybe_ver
+                        break
 
-def main():
-    parser = argparse.ArgumentParser(description="WGS Analysis Pipeline CLI")
-    subparsers = parser.add_subparsers(dest="command", help="Command to run")
-    
-    # Check command
-    check_parser = subparsers.add_parser("check", help="Check system requirements")
-    
-    # Run command
-    run_parser = subparsers.add_parser("run", help="Run the full pipeline")
-    
-    # QC command
-    qc_parser = subparsers.add_parser("qc", help="Run quality control step only")
-    
-    # Parse known args, keep others for the scripts
-    args, unknown = parser.parse_known_args()
-    
-    if args.command == "check":
-        cmd_check(args, unknown)
-    elif args.command == "run":
-        cmd_run(args, unknown)
-    elif args.command == "qc":
-        run_script("quality_control.sh", args, unknown)
+                if bash_bin is None:
+                    bash_bin = "/bin/bash"
+                    bash_ver = bash_version(bash_bin) or "unknown"
+
+        cmd = [bash_bin, str(script_path), *passthrough_args]
+        print(f"🚀 Running {script_path.name} (bash {bash_ver} via {bash_bin})...", flush=True)
     else:
+        cmd = [str(script_path), *passthrough_args]
+        print(f"🚀 Running {script_path.name}...", flush=True)
+
+    try:
+        completed = subprocess.run(cmd)
+    except KeyboardInterrupt:
+        eprint("\n⚠️ Interrupted by user.")
+        return 130
+    except OSError as exc:
+        eprint(f"❌ Failed to execute command: {exc}")
+        return 1
+
+    if completed.returncode != 0:
+        eprint(f"❌ {script_path.name} failed with exit code {completed.returncode}")
+
+    return completed.returncode
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="wgs",
+        description="WGS Analysis Pipeline CLI wrapper",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  wgs check -- --min-ram 32 --verbose\n"
+            "  wgs run -- --sample-id MySample --input-dir data/raw\n"
+            "  wgs qc -- --input-dir data/raw --threads 8\n"
+            "\n"
+            "Tip: use '--' before script flags to make argument forwarding explicit.\n"
+            "All flags after '--' are passed directly to the underlying script."
+        ),
+    )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
+
+    subparsers = parser.add_subparsers(dest="command", metavar="<command>")
+
+    subparsers.add_parser("check", help="Check system requirements")
+    subparsers.add_parser("run", help="Run the full pipeline")
+
+    subparsers.add_parser("qc", aliases=["quality-control"], help="Run quality control step")
+    subparsers.add_parser("clean", aliases=["data-cleaning"], help="Run data cleaning step")
+    subparsers.add_parser("align", aliases=["alignment"], help="Run alignment step")
+    subparsers.add_parser("call", aliases=["variant-calling"], help="Run variant calling step")
+    subparsers.add_parser("annotate", aliases=["annotation"], help="Run annotation step")
+
+    return parser
+
+
+def resolve_command_script(command: str) -> Tuple[Path, bool]:
+    command_map: Dict[str, Tuple[Path, bool]] = {
+        "check": (SCRIPT_DIR / "check_requirements.sh", False),
+        "run": (ROOT_DIR / "run_pipeline.sh", True),
+        "qc": (SCRIPT_DIR / "quality_control.sh", False),
+        "quality-control": (SCRIPT_DIR / "quality_control.sh", False),
+        "clean": (SCRIPT_DIR / "data_cleaning.sh", False),
+        "data-cleaning": (SCRIPT_DIR / "data_cleaning.sh", False),
+        "align": (SCRIPT_DIR / "alignment.sh", False),
+        "alignment": (SCRIPT_DIR / "alignment.sh", False),
+        "call": (SCRIPT_DIR / "variant_calling.sh", False),
+        "variant-calling": (SCRIPT_DIR / "variant_calling.sh", False),
+        "annotate": (SCRIPT_DIR / "vep_annotation.sh", False),
+        "annotation": (SCRIPT_DIR / "vep_annotation.sh", False),
+    }
+    return command_map[command]
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    known_commands = [
+        "check", "run",
+        "qc", "quality-control",
+        "clean", "data-cleaning",
+        "align", "alignment",
+        "call", "variant-calling",
+        "annotate", "annotation",
+    ]
+
+    # Friendly handling for mistyped command names before argparse exits.
+    if argv and not argv[0].startswith("-") and argv[0] not in known_commands:
+        bad = argv[0]
+        maybe = suggest(bad, known_commands)
+        if maybe:
+            eprint(f"❌ Unknown command '{bad}'. Did you mean '{maybe}'?")
+        else:
+            eprint(f"❌ Unknown command '{bad}'.")
+        eprint("Run 'wgs --help' to see available commands.")
+        return 2
+
+    # Directly route '<command> --help' to the underlying shell script help.
+    if len(argv) >= 2 and argv[0] in known_commands and argv[1] in ("-h", "--help"):
+        script_path, require_bash4 = resolve_command_script(argv[0])
+        print(f"→ Command: {argv[0]}", flush=True)
+        print("→ Forwarding args: --help", flush=True)
+        return run_script(script_path, ["--help"], require_bash4=require_bash4)
+
+    parser = build_parser()
+    args, unknown_args = parser.parse_known_args(argv)
+
+    if not args.command:
         parser.print_help()
+        return 0
+
+    script_path, require_bash4 = resolve_command_script(args.command)
+
+    # Make passthrough explicit: tolerate an initial '--'.
+    if unknown_args and unknown_args[0] == "--":
+        unknown_args = unknown_args[1:]
+
+    print(f"→ Command: {args.command}", flush=True)
+    if unknown_args:
+        quoted = " ".join(shlex.quote(x) for x in unknown_args)
+        print(f"→ Forwarding args: {quoted}", flush=True)
+
+    return run_script(script_path, unknown_args, require_bash4=require_bash4)
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
