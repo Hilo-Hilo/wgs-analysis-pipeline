@@ -44,6 +44,21 @@ info() {
     return 0
 }
 
+# Portable timeout wrapper (GNU timeout on Linux, gtimeout on macOS with coreutils)
+run_with_timeout() {
+    local seconds="$1"
+    shift
+
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "$seconds" "$@"
+    elif command -v gtimeout >/dev/null 2>&1; then
+        gtimeout "$seconds" "$@"
+    else
+        warning "timeout/gtimeout not found; running without timeout guard"
+        "$@"
+    fi
+}
+
 # Help function
 show_help() {
     cat << EOF
@@ -291,10 +306,23 @@ import gzip
 import random
 
 # Simple FASTQ read generator
+# Generate predominantly high-quality reads so integration tests remain stable
+# under fastp defaults (Q25, unqualified_percent_limit=20).
 def generate_read(read_id, length=100):
     bases = 'ATCG'
     sequence = ''.join(random.choice(bases) for _ in range(length))
-    quality = ''.join(chr(random.randint(33, 73)) for _ in range(length))
+
+    q_scores = []
+    for i in range(length):
+        if i < int(length * 0.85):
+            # Most of the read has strong quality
+            q = random.randint(35, 40)
+        else:
+            # Mild tail decay, still generally above threshold
+            q = random.randint(25, 35)
+        q_scores.append(chr(q + 33))
+
+    quality = ''.join(q_scores)
     return f"@read_{read_id}\n{sequence}\n+\n{quality}\n"
 
 # Generate R1 file
@@ -1575,7 +1603,7 @@ run_integration_tests() {
 
     # Test 2: Data cleaning
     info "Testing data cleaning step..."
-    if timeout 120 "$ROOT_DIR/scripts/data_cleaning.sh" \
+    if run_with_timeout 120 "$ROOT_DIR/scripts/data_cleaning.sh" \
         --input-dir data/raw \
         --output-dir data/processed \
         --sample-id test_sample \

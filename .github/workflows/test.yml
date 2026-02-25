@@ -93,7 +93,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-20.04, macos-14]
+        # Keep Linux + macOS coverage; ubuntu-20.04 has shown repeated queue deadlocks.
+        os: [ubuntu-22.04, macos-14]
 
     steps:
       - name: Checkout code

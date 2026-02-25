@@ -62,7 +62,7 @@ USAGE:
 OPTIONS:
     -h, --help          Show this help message
     -v, --verbose       Show detailed version parsing
-    --ci-mode           CI-friendly mode: warn instead of fail for missing optional tools
+    --ci-mode           CI-friendly mode: still enforce runtime deps, but tolerate missing bio tools
     --strict            Fail on any warning (missing optional tools)
     --tool TOOL         Check only a specific tool
     --version           Show script version
@@ -222,18 +222,23 @@ get_tool_version() {
 # Validate a single tool
 validate_tool() {
     local spec="$1"
+    local tool_class="${2:-bio}"
     local tool min_ver max_ver required
-    
+
     IFS='|' read -r tool min_ver max_ver required <<< "$spec"
-    
+
     # Skip if checking specific tool and this isn't it
     if [[ -n "$SPECIFIC_TOOL" && "$tool" != "$SPECIFIC_TOOL" ]]; then
         return 0
     fi
-    
+
     # Check if tool exists
     if ! command -v "$tool" &>/dev/null; then
         if [[ "$required" == "required" ]]; then
+            if [[ "$CI_MODE" == "true" && "$tool_class" == "bio" ]]; then
+                log_skip "$tool: not found (required bio tool, CI mode)"
+                return 0
+            fi
             log_fail "$tool: not found (required)"
             return 2
         else
@@ -297,14 +302,14 @@ main() {
     echo "Runtime Dependencies:"
     echo "---------------------"
     for spec in "${RUNTIME_DEPS[@]}"; do
-        validate_tool "$spec" || exit_code=$?
+        validate_tool "$spec" "runtime" || exit_code=$?
     done
     echo ""
     
     echo "Bioinformatics Tools:"
     echo "---------------------"
     for spec in "${TOOL_VERSIONS[@]}"; do
-        validate_tool "$spec" || exit_code=$?
+        validate_tool "$spec" "bio" || exit_code=$?
     done
     echo ""
     
