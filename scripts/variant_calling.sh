@@ -351,10 +351,19 @@ filter_variants() {
         fi
         
         # Get filtered statistics
-        local filtered_count=$(bcftools view -H "$filtered_vcf" | wc -l)
-        local raw_count=$(bcftools view -H "$raw_vcf" | wc -l)
-        local pass_rate=$((filtered_count * 100 / raw_count))
-        
+        local filtered_count
+        local raw_count
+        local pass_rate
+        filtered_count=$(bcftools view -H "$filtered_vcf" | wc -l | tr -d '[:space:]')
+        raw_count=$(bcftools view -H "$raw_vcf" | wc -l | tr -d '[:space:]')
+
+        if [[ -z "$raw_count" || "$raw_count" -eq 0 ]]; then
+            pass_rate=0
+            warning "No raw variants were called; pass rate is reported as 0%."
+        else
+            pass_rate=$((filtered_count * 100 / raw_count))
+        fi
+
         log "Variants after filtering: $filtered_count ($pass_rate% pass rate)"
         
     else
