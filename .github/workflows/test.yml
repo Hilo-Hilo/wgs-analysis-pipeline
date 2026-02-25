@@ -268,32 +268,14 @@ jobs:
             fi
           done
 
-          # Check for broken local markdown links across root + docs/
-          mapfile -t md_files < <(find . -type f -name '*.md' -not -path './.git/*' | sort)
-          for file in "${md_files[@]}"; do
-            while IFS= read -r link; do
-              # Skip URLs/anchors/mailto
-              if [[ "$link" == http* || "$link" == "#"* || "$link" == mailto:* ]]; then
-                continue
+          # Basic broken-link scan for local .md references
+          find . -type f -name '*.md' -not -path './.git/*' -print0 | \
+            xargs -0 grep -ohE '\]\([^)]+\.md[^)]*\)' | \
+            sed -E 's/\]\(([^)#?]+).*/\1/' | sort -u | while read -r link; do
+              if [[ ! -f "$link" ]]; then
+                echo "⚠️ Potentially broken link: $link"
               fi
-
-              target="$link"
-              target="${target%%#*}"   # strip anchor
-              target="${target%%\?*}"  # strip query
-
-              # Resolve relative to source file directory
-              src_dir=$(dirname "$file")
-              resolved=$(python3 - <<PY
-from pathlib import Path
-print((Path("$src_dir") / Path("$target")).resolve())
-PY
-)
-
-              if [[ ! -f "$resolved" ]]; then
-                echo "⚠️ Broken link in $file: $link"
-              fi
-            done < <(grep -oE '\[[^]]+\]\(([^)]+)\)' "$file" | sed -E 's/.*\(([^)]+)\)/\1/')
-          done
+            done
 
           echo "📖 Documentation check completed!"
 
