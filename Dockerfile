@@ -41,6 +41,9 @@ RUN apt-get update && apt-get install -y \
     # Perl and Java for bioinformatics tools
     perl \
     default-jre \
+    # Core HTS tools from apt (stable, modern samtools on arm64)
+    samtools \
+    bcftools \
     # Clean up
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -64,13 +67,17 @@ RUN conda config --set always_yes true && \
     fastqc \
     fastp \
     bwa \
-    samtools \
-    bcftools \
-    ensembl-vep && \
+    'bcftools>=1.18' && \
     conda clean -ya
 
 # Ensure tools from the analysis environment are on PATH
 ENV PATH="/opt/miniconda/envs/wgs_analysis/bin:$PATH"
+
+# Guardrail: fail image build if legacy samtools slipped in
+RUN bash -lc 'set -e; v=$(samtools 2>&1 | awk "/^Version:/{print \$2; exit}"); \
+  if [ -z "$v" ]; then v=$(samtools --version 2>/dev/null | awk "NR==1{print \$2}"); fi; \
+  echo "Detected samtools: $v"; \
+  case "$v" in 0.*) echo "ERROR: legacy samtools detected ($v)"; exit 1;; esac'
 
 # Install Python packages for testing and utilities
 RUN pip3 install --no-cache-dir \
@@ -109,6 +116,9 @@ ENTRYPOINT ["conda", "run", "--no-capture-output", "-n", "wgs_analysis"]
 CMD ["/bin/bash"]
 
 # Expose no ports (this is a compute container, not a service)
+
+# Note: VEP is intentionally not installed in the base image to avoid
+# incompatible legacy samtools resolution on ARM platforms.
 
 # Build information
 ARG BUILD_DATE

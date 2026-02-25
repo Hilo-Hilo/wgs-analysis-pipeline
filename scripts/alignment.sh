@@ -223,6 +223,17 @@ check_prerequisites() {
         error "samtools not found. Install with: conda install -c bioconda samtools"
         exit 1
     fi
+
+    # Guardrail: legacy samtools 0.1.x is unstable for large-sort workloads
+    local samtools_version
+    samtools_version=$(samtools --version 2>/dev/null | awk 'NR==1{print $2}')
+    if [[ -z "$samtools_version" ]]; then
+        samtools_version=$(samtools 2>&1 | awk '/^Version:/{print $2; exit}')
+    fi
+    if [[ "$samtools_version" =~ ^0\. ]]; then
+        error "Detected legacy samtools ${samtools_version}. Please install samtools >=1.10 (legacy 0.1.x can crash during alignment sort)."
+        exit 1
+    fi
     
     # Check reference genome
     if [[ ! -f "$REFERENCE_GENOME" ]]; then

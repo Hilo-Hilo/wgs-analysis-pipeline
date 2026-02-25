@@ -14,7 +14,8 @@ SCRIPT_NAME="check_requirements.sh"
 CONDA_ENV="wgs_analysis"
 MIN_RAM_GB=16
 MIN_DISK_GB=400
-REQUIRED_TOOLS=("fastqc" "fastp" "bwa" "samtools" "bcftools" "vep")
+REQUIRED_TOOLS=("fastqc" "fastp" "bwa" "samtools" "bcftools")
+OPTIONAL_TOOLS=("vep")
 VERBOSE=false
 SKIP_CONDA=false
 SKIP_ENV=false
@@ -356,7 +357,16 @@ check_tools() {
         echo "    conda install -c bioconda ${missing_tools[*]}"
         return 1
     fi
-    
+
+    # Optional tools (warn-only)
+    for tool in "${OPTIONAL_TOOLS[@]}"; do
+        if command -v "$tool" &> /dev/null; then
+            print_status "PASS" "$tool installed (optional)"
+        else
+            print_status "WARN" "$tool not found (optional; required only for annotation step)"
+        fi
+    done
+
     return 0
 }
 
