@@ -1109,22 +1109,134 @@ MOCK_ARITH
     # Re-enable errexit for the rest of the test harness
     set -e
 
+    # Test 11: SQLite sample registry unit tests (init + CRUD + edge cases)
+    info "Testing sample registry unit CRUD flows..."
+    if python3 "$ROOT_DIR/tests/test_sample_registry.py" > "$TEMP_TEST_DIR/logs/unit_registry.log" 2>&1; then
+        echo "  ✓ Sample registry unit tests passed"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ Sample registry unit tests failed"
+        warning "    See logs/unit_registry.log"
+        tests_failed=$((tests_failed + 1))
+    fi
+
     log "Unit tests completed: $tests_passed passed, $tests_failed failed"
+    return $tests_failed
+}
+
+# Integration smoke test for registry workflow (no external bioinformatics deps)
+run_registry_smoke_integration() {
+    local tests_passed=0
+    local tests_failed=0
+    local registry_db="$TEMP_TEST_DIR/registry/family_registry.db"
+
+    info "Running registry smoke integration via wgs CLI wrapper..."
+    if python3 "$ROOT_DIR/wgs" registry init --db "$registry_db" > logs/integration_registry_init.log 2>&1; then
+        echo "  ✓ Registry init via wgs CLI works"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ Registry init via wgs CLI failed"
+        warning "    See logs/integration_registry_init.log"
+        tests_failed=$((tests_failed + 1))
+    fi
+
+    if python3 "$ROOT_DIR/wgs" registry add \
+        --db "$registry_db" \
+        --sample-id family_child_01 \
+        --fastq-r1 data/raw/family_child_01_R1.fastq.gz \
+        --fastq-r2 data/raw/family_child_01_R2.fastq.gz \
+        --reference refs/GRCh38.fa \
+        --status pending \
+        --notes "Smoke integration sample" > logs/integration_registry_add.log 2>&1; then
+        echo "  ✓ Registry add via wgs CLI works"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ Registry add via wgs CLI failed"
+        warning "    See logs/integration_registry_add.log"
+        tests_failed=$((tests_failed + 1))
+    fi
+
+    if python3 "$ROOT_DIR/wgs" registry update \
+        --db "$registry_db" \
+        --sample-id family_child_01 \
+        --status running \
+        --notes "Smoke status update" \
+        --append-notes > logs/integration_registry_update.log 2>&1; then
+        echo "  ✓ Registry update via wgs CLI works"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ Registry update via wgs CLI failed"
+        warning "    See logs/integration_registry_update.log"
+        tests_failed=$((tests_failed + 1))
+    fi
+
+    if python3 "$ROOT_DIR/wgs" registry list --db "$registry_db" --sample-id family_child_01 --json \
+        > logs/integration_registry_list.json 2> logs/integration_registry_list.err; then
+        if python3 - << EOF > /dev/null 2>&1
+import json
+from pathlib import Path
+rows = json.loads(Path("logs/integration_registry_list.json").read_text())
+assert len(rows) == 1
+assert rows[0]["sample_id"] == "family_child_01"
+assert rows[0]["run_status"] == "running"
+assert "Smoke status update" in (rows[0]["notes"] or "")
+EOF
+        then
+            echo "  ✓ Registry list JSON reflects latest status"
+            tests_passed=$((tests_passed + 1))
+        else
+            echo "  ✗ Registry list JSON validation failed"
+            warning "    See logs/integration_registry_list.json"
+            tests_failed=$((tests_failed + 1))
+        fi
+    else
+        echo "  ✗ Registry list via wgs CLI failed"
+        warning "    stderr:"
+        cat logs/integration_registry_list.err 2>/dev/null || true
+        tests_failed=$((tests_failed + 1))
+    fi
+
+    # Pipeline hook discoverability: script should expose optional registry switch
+    if grep -q -- "--registry-db" "$ROOT_DIR/run_pipeline.sh"; then
+        echo "  ✓ run_pipeline.sh includes --registry-db hook"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ run_pipeline.sh missing --registry-db hook"
+        tests_failed=$((tests_failed + 1))
+    fi
+
+    info "Registry smoke integration: $tests_passed passed, $tests_failed failed"
     return $tests_failed
 }
 
 # Integration tests
 run_integration_tests() {
-    if [[ "$QUICK_TESTS" == "true" ]]; then
-        log "Skipping integration tests (quick mode)"
-        return 0
-    fi
-    
     log "Running integration tests..."
-    
+
     local tests_passed=0
     local tests_failed=0
-    
+
+    # Always run lightweight registry smoke integration (including quick mode)
+    local smoke_failures=0
+    set +e
+    run_registry_smoke_integration
+    smoke_failures=$?
+    set -e
+
+    local smoke_total=5
+    if [[ $smoke_failures -eq 0 ]]; then
+        tests_passed=$((tests_passed + smoke_total))
+    else
+        tests_failed=$((tests_failed + smoke_failures))
+        tests_passed=$((tests_passed + smoke_total - smoke_failures))
+    fi
+
+    if [[ "$QUICK_TESTS" == "true" ]]; then
+        log "Quick mode: skipped heavy bioinformatics integration tests"
+        log "Integration tests completed: $tests_passed passed, $tests_failed failed"
+        return $tests_failed
+    fi
+
     # Test 1: End-to-end pipeline with test data
     info "Testing quality control step..."
     if "$ROOT_DIR/scripts/quality_control.sh" \
@@ -1164,7 +1276,7 @@ run_integration_tests() {
         "data/processed/test_sample_clean_R1.fq.gz"
         "data/processed/test_sample_clean_R2.fq.gz"
     )
-    
+
     local files_found=0
     for file in "${output_files[@]}"; do
         if [[ -f "$file" ]]; then
@@ -1174,7 +1286,7 @@ run_integration_tests() {
             warning "  ✗ Missing: $file"
         fi
     done
-    
+
     if [[ $files_found -eq ${#output_files[@]} ]]; then
         echo "  ✓ All expected output files generated"
         tests_passed=$((tests_passed + 1))
@@ -1182,7 +1294,7 @@ run_integration_tests() {
         echo "  ✗ Some output files missing ($files_found/${#output_files[@]})"
         tests_failed=$((tests_failed + 1))
     fi
-    
+
     log "Integration tests completed: $tests_passed passed, $tests_failed failed"
     return $tests_failed
 }

@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 ROOT_DIR = Path(__file__).parent.resolve()
 SCRIPT_DIR = ROOT_DIR / "scripts"
 
@@ -142,6 +142,21 @@ def run_script(script_path: Path, passthrough_args: List[str], require_bash4: bo
     return completed.returncode
 
 
+def run_python_script(script_name: str, args: List[str]) -> int:
+    script_path = SCRIPT_DIR / script_name
+    if not script_path.exists():
+        eprint(f"❌ Script not found: {script_path}")
+        return 1
+
+    try:
+        completed = subprocess.run([sys.executable, str(script_path), *args])
+    except KeyboardInterrupt:
+        eprint("\n⚠️ Interrupted by user.")
+        return 130
+
+    return completed.returncode
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="wgs",
@@ -152,6 +167,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  wgs check -- --min-ram 32 --verbose\n"
             "  wgs run -- --sample-id MySample --input-dir data/raw\n"
             "  wgs qc -- --input-dir data/raw --threads 8\n"
+            "  wgs registry list --db family.db --json\n"
             "\n"
             "Tip: use '--' before script flags to make argument forwarding explicit.\n"
             "All flags after '--' are passed directly to the underlying script."
@@ -169,24 +185,27 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("align", aliases=["alignment"], help="Run alignment step")
     subparsers.add_parser("call", aliases=["variant-calling"], help="Run variant calling step")
     subparsers.add_parser("annotate", aliases=["annotation"], help="Run annotation step")
+    subparsers.add_parser("registry", help="Manage SQLite sample registry")
 
     return parser
 
 
-def resolve_command_script(command: str) -> Tuple[Path, bool]:
-    command_map: Dict[str, Tuple[Path, bool]] = {
-        "check": (SCRIPT_DIR / "check_requirements.sh", False),
-        "run": (ROOT_DIR / "run_pipeline.sh", True),
-        "qc": (SCRIPT_DIR / "quality_control.sh", False),
-        "quality-control": (SCRIPT_DIR / "quality_control.sh", False),
-        "clean": (SCRIPT_DIR / "data_cleaning.sh", False),
-        "data-cleaning": (SCRIPT_DIR / "data_cleaning.sh", False),
-        "align": (SCRIPT_DIR / "alignment.sh", False),
-        "alignment": (SCRIPT_DIR / "alignment.sh", False),
-        "call": (SCRIPT_DIR / "variant_calling.sh", False),
-        "variant-calling": (SCRIPT_DIR / "variant_calling.sh", False),
-        "annotate": (SCRIPT_DIR / "vep_annotation.sh", False),
-        "annotation": (SCRIPT_DIR / "vep_annotation.sh", False),
+def resolve_command_script(command: str) -> Tuple[Path, bool, bool]:
+    """Return (path, require_bash4, is_python_script)."""
+    command_map: Dict[str, Tuple[Path, bool, bool]] = {
+        "check": (SCRIPT_DIR / "check_requirements.sh", False, False),
+        "run": (ROOT_DIR / "run_pipeline.sh", True, False),
+        "qc": (SCRIPT_DIR / "quality_control.sh", False, False),
+        "quality-control": (SCRIPT_DIR / "quality_control.sh", False, False),
+        "clean": (SCRIPT_DIR / "data_cleaning.sh", False, False),
+        "data-cleaning": (SCRIPT_DIR / "data_cleaning.sh", False, False),
+        "align": (SCRIPT_DIR / "alignment.sh", False, False),
+        "alignment": (SCRIPT_DIR / "alignment.sh", False, False),
+        "call": (SCRIPT_DIR / "variant_calling.sh", False, False),
+        "variant-calling": (SCRIPT_DIR / "variant_calling.sh", False, False),
+        "annotate": (SCRIPT_DIR / "vep_annotation.sh", False, False),
+        "annotation": (SCRIPT_DIR / "vep_annotation.sh", False, False),
+        "registry": (SCRIPT_DIR / "sample_registry.py", False, True),
     }
     return command_map[command]
 
@@ -200,6 +219,7 @@ def main() -> int:
         "align", "alignment",
         "call", "variant-calling",
         "annotate", "annotation",
+        "registry",
     ]
 
     # Friendly handling for mistyped command names before argparse exits.
@@ -213,11 +233,13 @@ def main() -> int:
         eprint("Run 'wgs --help' to see available commands.")
         return 2
 
-    # Directly route '<command> --help' to the underlying shell script help.
+    # Directly route '<command> --help' to the underlying script help.
     if len(argv) >= 2 and argv[0] in known_commands and argv[1] in ("-h", "--help"):
-        script_path, require_bash4 = resolve_command_script(argv[0])
+        script_path, require_bash4, is_python = resolve_command_script(argv[0])
         print(f"→ Command: {argv[0]}", flush=True)
         print("→ Forwarding args: --help", flush=True)
+        if is_python:
+            return run_python_script(script_path.name, ["--help"])
         return run_script(script_path, ["--help"], require_bash4=require_bash4)
 
     parser = build_parser()
@@ -227,17 +249,21 @@ def main() -> int:
         parser.print_help()
         return 0
 
-    script_path, require_bash4 = resolve_command_script(args.command)
+    script_path, require_bash4, is_python = resolve_command_script(args.command)
 
     # Make passthrough explicit: tolerate an initial '--'.
     if unknown_args and unknown_args[0] == "--":
         unknown_args = unknown_args[1:]
 
-    print(f"→ Command: {args.command}", flush=True)
-    if unknown_args:
-        quoted = " ".join(shlex.quote(x) for x in unknown_args)
-        print(f"→ Forwarding args: {quoted}", flush=True)
+    # Keep machine-readable output clean for registry command.
+    if args.command != "registry":
+        print(f"→ Command: {args.command}", flush=True)
+        if unknown_args:
+            quoted = " ".join(shlex.quote(x) for x in unknown_args)
+            print(f"→ Forwarding args: {quoted}", flush=True)
 
+    if is_python:
+        return run_python_script(script_path.name, unknown_args)
     return run_script(script_path, unknown_args, require_bash4=require_bash4)
 
 

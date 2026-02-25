@@ -30,6 +30,7 @@ SLACK_WEBHOOK=""
 RESUME_FROM=""
 ASSUME_YES=false
 SKIP_REQUIREMENTS_CHECK=false
+REGISTRY_DB=""
 
 # Auto-detection mode (enabled by default, disabled with explicit overrides)
 AUTO_DETECT=true
@@ -220,6 +221,9 @@ GPU OPTIONS (alignment step):
 SAFETY / EXECUTION OPTIONS:
     -y, --yes                   Continue on requirement warnings without prompting
     --skip-requirements-check   Skip scripts/check_requirements.sh
+
+    --skip-requirements-check   Skip running scripts/check_requirements.sh
+    --registry-db PATH          Optional SQLite sample registry path
     --dry-run                   Show what would be done without executing
     --verbose                   Enable verbose output
 
@@ -448,6 +452,10 @@ parse_arguments() {
                 shift
                 ;;
 
+            --registry-db)
+                REGISTRY_DB="$2"
+                shift 2
+                ;;
             --dry-run)
                 DRY_RUN=true
                 shift
@@ -538,6 +546,77 @@ set_defaults() {
             print_cli_error "gpu-count must be a non-negative integer in CPU mode (got: '$GPU_COUNT')."
             exit 2
         fi
+    fi
+
+    REGISTRY_DB="${REGISTRY_DB:-}"
+}
+
+registry_enabled() {
+    [[ -n "${REGISTRY_DB:-}" ]]
+}
+
+registry_script_path() {
+    echo "$SCRIPT_DIR/scripts/sample_registry.py"
+}
+
+ensure_registry_record() {
+    if ! registry_enabled; then
+        return 0
+    fi
+
+    local registry_script
+    registry_script="$(registry_script_path)"
+
+    if [[ ! -f "$registry_script" ]]; then
+        echo "⚠️ Registry enabled but script not found: $registry_script"
+        return 0
+    fi
+
+    local default_r1="$INPUT_DIR/${SAMPLE_ID}_R1.fastq.gz"
+    local default_r2="$INPUT_DIR/${SAMPLE_ID}_R2.fastq.gz"
+
+    if ! python3 "$registry_script" init --db "$REGISTRY_DB" >/dev/null 2>&1; then
+        echo "⚠️ Could not initialize sample registry at $REGISTRY_DB (continuing without registry updates)"
+        return 0
+    fi
+
+    if ! python3 "$registry_script" add \
+        --db "$REGISTRY_DB" \
+        --sample-id "$SAMPLE_ID" \
+        --fastq-r1 "$default_r1" \
+        --fastq-r2 "$default_r2" \
+        --output-dir "$OUTPUT_DIR" \
+        --status pending \
+        --allow-existing \
+        --quiet >/dev/null 2>&1; then
+        echo "⚠️ Failed to ensure registry record for sample '$SAMPLE_ID' (continuing)"
+    fi
+}
+
+update_registry_status() {
+    local status="$1"
+    local note="$2"
+
+    if ! registry_enabled; then
+        return 0
+    fi
+
+    local registry_script
+    registry_script="$(registry_script_path)"
+
+    if [[ ! -f "$registry_script" ]]; then
+        return 0
+    fi
+
+    if ! python3 "$registry_script" update \
+        --db "$REGISTRY_DB" \
+        --sample-id "$SAMPLE_ID" \
+        --output-dir "$OUTPUT_DIR" \
+        --status "$status" \
+        --notes "$note" \
+        --append-notes \
+        --quiet >/dev/null 2>&1; then
+        echo "⚠️ Registry update failed for sample '$SAMPLE_ID' (status=$status). Continuing."
     fi
 }
 
@@ -809,6 +888,12 @@ show_pipeline_summary() {
         printf "Requirements Check: Skipped\n"
     fi
 
+    if registry_enabled; then
+        printf "Sample Registry DB: %s\n" "$REGISTRY_DB"
+    else
+        printf "Sample Registry DB: disabled\n"
+    fi
+
     echo
 }
 
@@ -841,6 +926,10 @@ main() {
     # Validate environment
     validate_environment
 
+    # Optional sample-registry setup (non-blocking)
+    ensure_registry_record
+    update_registry_status "running" "Pipeline started"
+
     # Initialize progress monitoring
     init_progress_monitor "WGS_Pipeline_${SAMPLE_ID}" "${#STEP_ORDER[@]}" "logs"
 
@@ -871,10 +960,12 @@ main() {
 
     # Final status
     if [[ "$pipeline_success" == "true" ]]; then
+        update_registry_status "completed" "Pipeline finished successfully"
         echo "🎉 Pipeline completed successfully!"
         echo "📁 Results available in: $OUTPUT_DIR"
         exit 0
     else
+        update_registry_status "failed" "Pipeline failed at step: $failed_step"
         echo "💥 Pipeline failed at step: $failed_step"
         echo "📋 Check logs for details: logs/WGS_Pipeline_${SAMPLE_ID}_progress.log"
         exit 1
@@ -883,6 +974,8 @@ main() {
 
 # Handle interrupts
 trap handle_interrupt INT TERM
+
+trap 'echo; echo "⚠️ Pipeline interrupted by user"; update_registry_status "failed" "Pipeline interrupted by user"; cleanup_progress_monitor; exit 1' INT TERM
 
 # Run main function
 main "$@"
