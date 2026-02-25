@@ -25,7 +25,7 @@ A memory-optimized whole-genome sequencing analysis pipeline for variant discove
 - **CPU:** 4+ cores
 
 Core pipeline tools are installed via conda:
-FastQC, fastp, BWA, SAMtools, BCFtools.
+FastQC, fastp, BWA-MEM2, SAMtools, BCFtools.
 
 `vep` is optional (annotation step only) and may be installed separately on
 platforms where base environments prioritize toolchain stability.
@@ -42,6 +42,13 @@ bash scripts/validate_deps.sh --ci-mode     # validate dependency versions
 # place paired FASTQ files in data/raw/
 bash run_pipeline.sh --sample-id MySample --input-dir data/raw --output-dir results
 ```
+
+## Documentation
+
+- Documentation index: [docs/README.md](docs/README.md)
+- Getting started: [docs/guides/getting-started.md](docs/guides/getting-started.md)
+- Troubleshooting: [docs/guides/troubleshooting.md](docs/guides/troubleshooting.md)
+- Sample registry: [docs/reference/sample-registry.md](docs/reference/sample-registry.md)
 
 ## Hardware Auto-Detection
 
@@ -107,7 +114,7 @@ Notes:
 
 ## DGX GPU Alignment (Optional)
 
-Alignment defaults to CPU BWA. On DGX systems you can enable GPU alignment
+Alignment defaults to CPU BWA-MEM2. On DGX systems you can enable GPU alignment
 for the alignment step using Parabricks:
 
 ```bash
@@ -121,7 +128,7 @@ bash run_pipeline.sh \
 Notes:
 - `--use-gpu` only affects the `alignment` step.
 - Requires `nvidia-smi` and `pbrun` in PATH.
-- If GPU flags are not provided, pipeline uses CPU BWA path.
+- If GPU flags are not provided, pipeline uses the CPU BWA-MEM2 path.
 
 ## Optional Sample Registry (Small Family Projects)
 
@@ -140,7 +147,7 @@ bash run_pipeline.sh --sample-id child_01 --input-dir data/raw --output-dir resu
   --registry-db .wgs/family_registry.db
 ```
 
-See [SAMPLE_REGISTRY.md](SAMPLE_REGISTRY.md) for schema and full workflow.
+See [docs/reference/sample-registry.md](docs/reference/sample-registry.md) for schema and full workflow.
 
 ## Pipeline Stages
 
@@ -149,7 +156,7 @@ See [SAMPLE_REGISTRY.md](SAMPLE_REGISTRY.md) for schema and full workflow.
 | Requirements check | `scripts/check_requirements.sh` | Validate tools and system resources | < 1 min | — |
 | Quality control | `scripts/quality_control.sh` | FastQC reports on raw reads | 15–30 min | 2 GB |
 | Data cleaning | `scripts/data_cleaning.sh` | Adapter/quality trimming with fastp | 30–60 min | 2 GB |
-| Alignment | `scripts/alignment.sh` | BWA-MEM alignment, sort, markdup | 6–10 h | 14 GB |
+| Alignment | `scripts/alignment.sh` | BWA-MEM2 alignment, sort, markdup | 6–10 h | 14 GB |
 | Variant calling | `scripts/variant_calling.sh` | BCFtools mpileup + call, filtering | 2–4 h | 3 GB |
 | Annotation | `scripts/vep_annotation.sh` | Ensembl VEP functional annotation | 1–2 h | 6 GB |
 
@@ -224,7 +231,7 @@ CI runs automatically via GitHub Actions (`.github/workflows/test.yml`).
 │   ├── detect_hardware.sh       # CPU/RAM/GPU auto-detection
 │   ├── quality_control.sh       # FastQC
 │   ├── data_cleaning.sh         # fastp trimming
-│   ├── alignment.sh             # CPU BWA or GPU Parabricks
+│   ├── alignment.sh             # CPU BWA-MEM2 or GPU Parabricks
 │   ├── variant_calling.sh       # BCFtools
 │   ├── vep_annotation.sh        # Ensembl VEP
 │   ├── load_config.sh           # Config loader
@@ -240,10 +247,16 @@ CI runs automatically via GitHub Actions (`.github/workflows/test.yml`).
 │   ├── run_tests.sh             # Test suite
 │   ├── test_sample_registry.py  # Registry unit tests (init/CRUD)
 │   └── generate_sample_data.py  # Synthetic data generator
-├── SAMPLE_REGISTRY.md           # Registry schema + family workflow
 ├── DEPENDENCIES.md              # Version policy documentation
-├── GETTING_STARTED.md
-├── TROUBLESHOOTING.md
+├── docs/
+│   ├── README.md                # Documentation index
+│   ├── architecture/
+│   │   └── codebase-overview.md
+│   ├── guides/
+│   │   ├── getting-started.md
+│   │   └── troubleshooting.md
+│   └── reference/
+│       └── sample-registry.md
 ├── Dockerfile
 ├── docker-compose.yml
 └── LICENSE

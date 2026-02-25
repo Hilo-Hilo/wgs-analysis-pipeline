@@ -16,6 +16,6 @@ dependencies:
   # Note: upper bounds set permissively for minor/patch updates
   - fastqc>=0.11.9,<0.13
   - fastp>=0.20.0
-  - bwa>=0.7.17,<0.8
+  - bwa-mem2>=2.2.1,<3
   - samtools>=1.15
   - bcftools>=1.15

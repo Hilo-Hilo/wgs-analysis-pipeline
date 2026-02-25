@@ -32,7 +32,7 @@ Generates a tiny synthetic reference genome:
 - Multiple "chromosomes" (4 contigs, ~100kb total)
 - Known variant positions for validation
 - Deterministic output (fixed seed)
-- Ready for BWA indexing
+- Ready for BWA-MEM2 indexing
 
 ```bash
 python3 tests/smoke/generate_reference.py \

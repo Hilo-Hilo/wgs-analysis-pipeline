@@ -87,7 +87,7 @@ jobs:
         
         ## Quick Start
         
-        See [GETTING_STARTED.md](GETTING_STARTED.md) for detailed instructions.
+        See [docs/guides/getting-started.md](docs/guides/getting-started.md) for detailed instructions.
         
         ## System Requirements
         
@@ -192,7 +192,7 @@ jobs:
           echo 'Testing tool availability...' &&
           fastqc --version &&
           fastp --version &&
-          bwa 2>&1 | head -1 &&
+          bwa-mem2 version | head -1 &&
           samtools --version | head -1 &&
           bcftools --version | head -1 &&
           echo '✅ All tools available!'

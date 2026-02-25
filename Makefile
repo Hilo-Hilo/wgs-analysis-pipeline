@@ -29,7 +29,7 @@ smoke-mock: ## Run smoke test with mock tools (~10s, no deps required)
 	@echo "Running mock smoke test..."
 	bash tests/smoke/run_smoke.sh --mock --profile good
 
-smoke-real: ## Run smoke test with real tools (requires bwa, samtools, etc.)
+smoke-real: ## Run smoke test with real tools (requires bwa-mem2, samtools, etc.)
 	@echo "Running real smoke test..."
 	bash tests/smoke/run_smoke.sh --real --profile good --verbose
 

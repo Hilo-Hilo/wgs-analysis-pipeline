@@ -7,7 +7,7 @@ Creates a deterministic ~100kb genome with:
 - Known variant positions for validation
 - Predictable sequence patterns for debugging
 
-Output: FASTA file ready for BWA indexing
+Output: FASTA file ready for BWA-MEM2 indexing
 """
 
 import argparse

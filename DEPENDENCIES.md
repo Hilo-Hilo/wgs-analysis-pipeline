@@ -16,7 +16,7 @@ We follow a **minimum version with range** policy:
 |------|---------|---------|-------|
 | `fastqc` | 0.11.9 | 0.12.x | QC reports |
 | `fastp` | 0.20.0 | 1.x | Read trimming (v1.0 is latest major) |
-| `bwa` | 0.7.17 | 0.7.x | Alignment (BWA-MEM) |
+| `bwa-mem2` | 2.2.1 | 2.x | Alignment (BWA-MEM2) |
 | `samtools` | 1.15 | 1.x | BAM processing (htslib-based) |
 | `bcftools` | 1.15 | 1.x | Variant calling (htslib-based) |
 
@@ -47,7 +47,6 @@ We follow a **minimum version with range** policy:
 
 The CI tests against:
 - Ubuntu 22.04 (primary)
-- Ubuntu 20.04 (compatibility)
 - macOS 14 (ARM64)
 
 ## Version Pinning Strategy
@@ -60,7 +59,7 @@ dependencies:
   - python=3.11
   - fastqc>=0.11.9
   - fastp>=0.20.0
-  - bwa>=0.7.17
+  - bwa-mem2>=2.2.1
   - samtools>=1.15
   - bcftools>=1.15
 ```

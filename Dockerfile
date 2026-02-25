@@ -90,7 +90,7 @@ RUN bash -lc 'set -euo pipefail; \
       python=3.11 \
       fastqc \
       fastp \
-      bwa \
+      bwa-mem2 \
       "samtools>=1.18" \
       "bcftools>=1.18"; \
     conda clean -ya'

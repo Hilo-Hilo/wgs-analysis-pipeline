@@ -29,7 +29,7 @@ STRICT=false
 declare -a TOOL_VERSIONS=(
     "fastqc|0.11.9|0.12.99|required"
     "fastp|0.20.0|1.99.99|required"
-    "bwa|0.7.17|0.7.99|required"
+    "bwa-mem2|2.2.1|2.99.99|required"
     "samtools|1.15|1.99.99|required"
     "bcftools|1.15|1.99.99|required"
     "vep|105.0|199.99|optional"
@@ -192,8 +192,8 @@ get_tool_version() {
         fastp)
             version=$(fastp --version 2>&1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)
             ;;
-        bwa)
-            version=$(bwa 2>&1 | grep -i "version" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)
+        bwa-mem2)
+            version=$(bwa-mem2 version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)
             ;;
         samtools)
             version=$(samtools --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)

@@ -143,7 +143,7 @@ jobs:
           echo "🔍 Verifying installed tools..."
           fastqc --version || true
           fastp --version || true
-          bwa 2>&1 | head -3 || true
+          bwa-mem2 version || true
           samtools --version || true
           bcftools --version || true
 
@@ -220,7 +220,7 @@ jobs:
           # ENTRYPOINT already executes inside conda env (wgs_analysis)
           docker run --rm wgs-pipeline:test fastqc --version
           docker run --rm wgs-pipeline:test fastp --version
-          docker run --rm wgs-pipeline:test bash -lc "bwa 2>&1 | head -1"
+          docker run --rm wgs-pipeline:test bash -lc "bwa-mem2 version | head -1"
           docker run --rm wgs-pipeline:test bash -lc "samtools --version | head -1"
           docker run --rm wgs-pipeline:test bash -lc "bcftools --version | head -1"
 
@@ -251,9 +251,12 @@ jobs:
           # Check that required documentation exists
           required_docs=(
             "README.md"
-            "GETTING_STARTED.md"
-            "TROUBLESHOOTING.md"
             "DEPENDENCIES.md"
+            "docs/README.md"
+            "docs/architecture/codebase-overview.md"
+            "docs/guides/getting-started.md"
+            "docs/guides/troubleshooting.md"
+            "docs/reference/sample-registry.md"
           )
 
           for doc in "${required_docs[@]}"; do
@@ -265,17 +268,31 @@ jobs:
             fi
           done
 
-          # Check for broken links (basic)
-          grep -r "\[.*\](.*\.md)" *.md | while read -r line; do
-            file=$(echo "$line" | cut -d: -f1)
-            link=$(echo "$line" | grep -o '\[.*\](.*\.md)' | sed 's/.*](\(.*\))/\1/')
+          # Check for broken local markdown links across root + docs/
+          mapfile -t md_files < <(find . -type f -name '*.md' -not -path './.git/*' | sort)
+          for file in "${md_files[@]}"; do
+            while IFS= read -r link; do
+              # Skip URLs/anchors/mailto
+              if [[ "$link" == http* || "$link" == "#"* || "$link" == mailto:* ]]; then
+                continue
+              fi
 
-            if [[ -f "$link" ]]; then
-              echo "✅ Valid link in $file: $link"
-            else
-              echo "⚠️ Broken link in $file: $link"
-              # Don't exit here, just report
-            fi
+              target="$link"
+              target="${target%%#*}"   # strip anchor
+              target="${target%%\?*}"  # strip query
+
+              # Resolve relative to source file directory
+              src_dir=$(dirname "$file")
+              resolved=$(python3 - <<PY
+from pathlib import Path
+print((Path("$src_dir") / Path("$target")).resolve())
+PY
+)
+
+              if [[ ! -f "$resolved" ]]; then
+                echo "⚠️ Broken link in $file: $link"
+              fi
+            done < <(grep -oE '\[[^]]+\]\(([^)]+)\)' "$file" | sed -E 's/.*\(([^)]+)\)/\1/')
           done
 
           echo "📖 Documentation check completed!"

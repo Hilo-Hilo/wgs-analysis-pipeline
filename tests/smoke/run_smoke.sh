@@ -19,7 +19,7 @@
 #
 # Options:
 #   --mock              Use mock tools (fast, no bioinformatics deps required)
-#   --real              Use real tools (requires bwa, samtools, bcftools, fastp, fastqc)
+#   --real              Use real tools (requires bwa-mem2, samtools, bcftools, fastp, fastqc)
 #   --profile PROFILE   Quality profile: good, poor, adapter, mixed (default: good)
 #   --keep              Keep output artifacts after completion
 #   --verbose           Enable verbose output
@@ -234,7 +234,7 @@ if python3 "$SCRIPT_DIR/generate_reference.py" \
     # Create indexes - either real or mock depending on mode
     if [[ "$USE_MOCK" == "true" ]]; then
         info "Creating mock reference indexes..."
-        # Create mock BWA index files
+        # Create mock BWA-MEM2-compatible index files
         touch "$REF_FASTA.bwt" "$REF_FASTA.pac" "$REF_FASTA.ann" "$REF_FASTA.amb" "$REF_FASTA.sa"
         # Create mock samtools index
         awk '/^>/ {contig=substr($1,2); next} {len+=length($0)} END {}' "$REF_FASTA" > /dev/null
@@ -244,9 +244,9 @@ if python3 "$SCRIPT_DIR/generate_reference.py" \
              END {if (contig) print contig"\t"len"\t"1"\t80\t81"}' "$REF_FASTA" > "$REF_FASTA.fai" 2>/dev/null || touch "$REF_FASTA.fai"
     else
         # Real mode - use actual tools
-        if command -v bwa &>/dev/null; then
-            info "Indexing reference with BWA..."
-            bwa index "$REF_FASTA" 2>/dev/null || warning "BWA indexing failed"
+        if command -v bwa-mem2 &>/dev/null; then
+            info "Indexing reference with BWA-MEM2..."
+            bwa-mem2 index "$REF_FASTA" 2>/dev/null || warning "BWA-MEM2 indexing failed"
         fi
         
         if command -v samtools &>/dev/null; then
@@ -342,8 +342,8 @@ cat > "$json" << JSON
 JSON
 MOCK
     
-    # Mock bwa
-    cat > "$MOCK_BIN/bwa" << 'MOCK'
+    # Mock bwa-mem2
+    cat > "$MOCK_BIN/bwa-mem2" << 'MOCK'
 #!/bin/bash
 case "$1" in
     index) exit 0 ;;
@@ -518,7 +518,7 @@ CLEANED_R1="$CLEAN_OUTPUT/${SAMPLE_ID}_clean_R1.fq.gz"
 CLEANED_R2="$CLEAN_OUTPUT/${SAMPLE_ID}_clean_R2.fq.gz"
 
 if [[ -f "$CLEANED_R1" && -f "$CLEANED_R2" ]]; then
-    step "Step 5: Alignment (BWA/samtools)"
+    step "Step 5: Alignment (BWA-MEM2/samtools)"
     
     ALIGN_OUTPUT="$SMOKE_OUTPUT_DIR/results/alignment"
     mkdir -p "$ALIGN_OUTPUT"

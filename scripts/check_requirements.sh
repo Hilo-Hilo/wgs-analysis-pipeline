@@ -14,7 +14,7 @@ SCRIPT_NAME="check_requirements.sh"
 CONDA_ENV="wgs_analysis"
 MIN_RAM_GB=16
 MIN_DISK_GB=400
-REQUIRED_TOOLS=("fastqc" "fastp" "bwa" "samtools" "bcftools")
+REQUIRED_TOOLS=("fastqc" "fastp" "bwa-mem2" "samtools" "bcftools")
 OPTIONAL_TOOLS=("vep")
 VERBOSE=false
 SKIP_CONDA=false
@@ -297,7 +297,7 @@ check_conda_environment() {
         print_status "FAIL" "Conda environment '$CONDA_ENV' not found"
         echo "  Create environment with:"
         echo "    conda create -n $CONDA_ENV -c bioconda -c conda-forge \\"
-        echo "      python=3.9 fastqc fastp bwa samtools bcftools"
+        echo "      python=3.11 fastqc fastp bwa-mem2 samtools bcftools"
         return 1
     fi
     
@@ -331,8 +331,8 @@ check_tools() {
                 "fastp")
                     version=$(fastp --version 2>&1 | head -1 | awk '{print $2}')
                     ;;
-                "bwa")
-                    version=$(bwa 2>&1 | grep "Version" | awk '{print $2}')
+                "bwa-mem2")
+                    version=$(bwa-mem2 version 2>/dev/null | awk '{print $NF}' | head -1)
                     ;;
                 "samtools")
                     version=$(samtools --version 2>/dev/null | head -1 | awk '{print $2}')
@@ -406,7 +406,7 @@ estimate_resource_usage() {
     echo "├─────────────────────┼─────────────┼─────────────┤"
     echo "│ Quality Control     │ 10-30 min   │ 1-2 GB      │"
     echo "│ Read Cleaning       │ 30-60 min   │ 2-4 GB      │"
-    echo "│ Alignment (BWA)     │ 2-6 hours   │ 8-16 GB     │"
+    echo "│ Alignment (BWA-MEM2)│ 1.5-5 hours │ 8-16 GB     │"
     echo "│ Variant Calling     │ 1-4 hours   │ 4-8 GB      │"
     echo "│ Annotation (VEP)    │ 30-90 min   │ 8-16 GB     │"
     echo "└─────────────────────┴─────────────┴─────────────┘"

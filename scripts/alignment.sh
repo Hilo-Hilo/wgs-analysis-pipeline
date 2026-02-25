@@ -26,7 +26,7 @@ $SCRIPT_NAME v$SCRIPT_VERSION - 16GB RAM Optimized WGS Alignment
 
 DESCRIPTION:
     Performs read mapping to GRCh38 reference genome.
-    Default path uses BWA + samtools (CPU). Optional GPU mode uses
+    Default path uses BWA-MEM2 + samtools (CPU). Optional GPU mode uses
     Parabricks on DGX-class systems.
 
 USAGE:
@@ -49,7 +49,7 @@ OPTIONS:
 
 16GB OPTIMIZATIONS:
     - Limited to 4 threads to conserve memory
-    - 10GB maximum memory usage for BWA
+    - 10GB maximum memory usage for BWA-MEM2
     - Sequential processing to avoid memory conflicts
     - Aggressive cleanup of intermediate files
 
@@ -67,9 +67,9 @@ EXAMPLES:
     $0 --use-gpu --gpu-aligner parabricks --gpu-count 1 --threads 32
 
 REQUIREMENTS:
-    - CPU mode: BWA and samtools installed
+    - CPU mode: bwa-mem2 and samtools installed
     - GPU mode: nvidia-smi + pbrun (Parabricks) installed
-    - GRCh38 reference genome indexed with BWA
+    - GRCh38 reference genome indexed with BWA-MEM2
     - Cleaned FASTQ files from quality control step
     - 16GB RAM, 200GB free disk space
 
@@ -216,7 +216,7 @@ set_defaults() {
     if [[ "$USE_GPU" == "true" ]]; then
         ALIGNMENT_METHOD="gpu-${GPU_ALIGNER}"
     else
-        ALIGNMENT_METHOD="cpu-bwa"
+        ALIGNMENT_METHOD="cpu-bwa-mem2"
     fi
 
     DRY_RUN="${DRY_RUN:-false}"
@@ -266,10 +266,10 @@ detect_input_files() {
 check_prerequisites() {
     log "Checking prerequisites for alignment..."
 
-    # CPU mode requires bwa; GPU mode uses pbrun
+    # CPU mode requires bwa-mem2; GPU mode uses pbrun
     if [[ "$USE_GPU" != "true" ]]; then
-        if ! command -v bwa &> /dev/null; then
-            error "BWA not found. Install with: conda install -c bioconda bwa"
+        if ! command -v bwa-mem2 &> /dev/null; then
+            error "bwa-mem2 not found. Install with: conda install -c bioconda bwa-mem2"
             exit 1
         fi
     fi
@@ -322,9 +322,10 @@ check_prerequisites() {
         exit 1
     fi
     
-    # Check BWA index
-    if [[ ! -f "$REFERENCE_GENOME.bwt" ]]; then
-        error "BWA index not found. Create with: bwa index $REFERENCE_GENOME"
+    # Check reference index
+    # Accept either bwa-mem2 index set (preferred) or legacy bwa index set
+    if [[ ! -f "$REFERENCE_GENOME.0123" && ! -f "$REFERENCE_GENOME.bwt.2bit.64" && ! -f "$REFERENCE_GENOME.bwt" ]]; then
+        error "Reference index not found. Create with: bwa-mem2 index $REFERENCE_GENOME"
         exit 1
     fi
     
@@ -417,9 +418,9 @@ run_gpu_alignment() {
     log "Aligned BAM file size: $bam_size"
 }
 
-# Run BWA alignment (16GB optimized)
-run_bwa_alignment() {
-    log "Starting BWA alignment (16GB optimized)..."
+# Run BWA-MEM2 alignment (16GB optimized)
+run_bwa_mem2_alignment() {
+    log "Starting BWA-MEM2 alignment (16GB optimized)..."
     
     local bam_output="$OUTPUT_DIR/${SAMPLE_ID}_aligned_sorted.bam"
     
@@ -430,7 +431,7 @@ run_bwa_alignment() {
     fi
     
     if [[ "$DRY_RUN" == "true" ]]; then
-        echo "Would run BWA alignment with:"
+        echo "Would run BWA-MEM2 alignment with:"
         echo "  Input R1: $CLEANED_R1"
         echo "  Input R2: $CLEANED_R2"
         echo "  Output: $bam_output"
@@ -439,47 +440,29 @@ run_bwa_alignment() {
         return 0
     fi
     
-    info "Running BWA-MEM with 16GB optimized settings..."
+    info "Running BWA-MEM2 with 16GB optimized settings..."
     info "Memory limit: 10GB, Threads: $THREADS"
     info "This may take 2-4 hours for WGS data"
     
-    # Run BWA-MEM with direct BAM output and sorting
-    local bwa_cmd="bwa mem -t $THREADS -M"
-    bwa_cmd+=" -R '@RG\tID:$SAMPLE_ID\tSM:$SAMPLE_ID\tPL:ILLUMINA\tLB:WGS\tPU:$SAMPLE_ID'"
-    bwa_cmd+=" $REFERENCE_GENOME $CLEANED_R1 $CLEANED_R2"
-    
-    # Samtools compatibility:
-    # - samtools >=1.x supports: samtools sort -@ N -m 2G -o out.bam -
-    # - samtools 0.1.x uses old syntax: samtools sort -m BYTES - prefix
-    local samtools_version
-    samtools_version=$(samtools --version 2>/dev/null | awk 'NR==1{print $2}')
-    if [[ -z "$samtools_version" ]]; then
-        samtools_version=$(samtools 2>&1 | awk '/^Version:/{print $2; exit}')
-    fi
+    # Run BWA-MEM2 with direct BAM output and sorting
+    local rg="@RG\tID:${SAMPLE_ID}\tSM:${SAMPLE_ID}\tPL:ILLUMINA\tLB:WGS\tPU:${SAMPLE_ID}"
+    local -a bwa_mem2_cmd=(
+        bwa-mem2 mem
+        -t "$THREADS"
+        -M
+        -R "$rg"
+        "$REFERENCE_GENOME"
+        "$CLEANED_R1"
+        "$CLEANED_R2"
+    )
 
-    if [[ "$samtools_version" =~ ^0\. ]]; then
-        warning "Detected legacy samtools $samtools_version; using compatibility sort syntax"
-        local sort_prefix="$OUTPUT_DIR/${SAMPLE_ID}_aligned_sorted"
+    local -a samtools_cmd=(samtools sort -@ "$THREADS" -m 2G -o "$bam_output" -)
 
-        if eval "$bwa_cmd | samtools sort -m 2000000000 - $sort_prefix" 2>>"$LOG_DIR/alignment.log"; then
-            # Legacy samtools writes ${prefix}.bam
-            if [[ -f "${sort_prefix}.bam" ]]; then
-                mv -f "${sort_prefix}.bam" "$bam_output"
-            fi
-            log "BWA alignment and sorting completed successfully"
-        else
-            error "BWA alignment failed"
-            return 1
-        fi
+    if "${bwa_mem2_cmd[@]}" 2>>"$LOG_DIR/alignment.log" | "${samtools_cmd[@]}" 2>>"$LOG_DIR/alignment.log"; then
+        log "BWA-MEM2 alignment and sorting completed successfully"
     else
-        local samtools_cmd="samtools sort -@ $THREADS -m 2G -o $bam_output -"
-
-        if eval "$bwa_cmd | $samtools_cmd" 2>>"$LOG_DIR/alignment.log"; then
-            log "BWA alignment and sorting completed successfully"
-        else
-            error "BWA alignment failed"
-            return 1
-        fi
+        error "BWA-MEM2 alignment failed"
+        return 1
     fi
 
     # Get file size
@@ -579,7 +562,7 @@ generate_summary() {
 
 ## Alignment Parameters:
 - Mode: $ALIGNMENT_METHOD
-- Tool: $(if [[ "$USE_GPU" == "true" ]]; then echo "Parabricks (pbrun fq2bam)"; else echo "BWA-MEM v$(bwa 2>&1 | grep Version | awk '{print $2}' || echo unknown)"; fi)
+- Tool: $(if [[ "$USE_GPU" == "true" ]]; then echo "Parabricks (pbrun fq2bam)"; else echo "BWA-MEM2 v$(bwa-mem2 version 2>/dev/null | awk '{print $NF}' | head -1 || echo unknown)"; fi)
 - samtools: v$(samtools --version | head -1 | awk '{print $2}' || echo "unknown")
 - Threads: $THREADS
 - GPUs: $GPU_COUNT
@@ -681,7 +664,7 @@ main() {
     if [[ "$USE_GPU" == "true" ]]; then
         run_gpu_alignment || exit 1
     else
-        run_bwa_alignment || exit 1
+        run_bwa_mem2_alignment || exit 1
     fi
 
     index_bam || exit 1

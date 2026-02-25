@@ -245,7 +245,7 @@ NOTIFICATION OPTIONS:
 PIPELINE STEPS:
     quality-control             FastQC analysis of raw reads
     data-cleaning               Adapter trimming and quality filtering
-    alignment                   BWA/Parabricks mapping to reference genome
+    alignment                   BWA-MEM2/Parabricks mapping to reference genome
     variant-calling             bcftools variant calling
     annotation                  VEP variant annotation
 
@@ -634,7 +634,7 @@ define_pipeline_steps() {
     declare -gA STEP_DESCRIPTIONS
     STEP_DESCRIPTIONS["quality-control"]="FastQC quality control analysis"
     STEP_DESCRIPTIONS["data-cleaning"]="Adapter trimming and quality filtering"
-    STEP_DESCRIPTIONS["alignment"]="BWA alignment to reference genome"
+    STEP_DESCRIPTIONS["alignment"]="BWA-MEM2 alignment to reference genome"
     STEP_DESCRIPTIONS["variant-calling"]="bcftools variant calling"
     STEP_DESCRIPTIONS["annotation"]="VEP variant annotation"
 
@@ -870,7 +870,7 @@ show_pipeline_summary() {
     if [[ "$USE_GPU" == "true" ]]; then
         printf "Alignment Mode: GPU (%s, %d GPUs)\n" "$GPU_ALIGNER" "$GPU_COUNT"
     else
-        printf "Alignment Mode: CPU (BWA)\n"
+        printf "Alignment Mode: CPU (BWA-MEM2)\n"
     fi
 
     if [[ "$ENABLE_NOTIFICATIONS" == "true" ]]; then
