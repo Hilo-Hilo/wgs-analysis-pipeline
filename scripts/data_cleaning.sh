@@ -105,10 +105,21 @@ safe_mkdir() {
     [[ -n "$dir" ]] && mkdir -p "$dir" 2>/dev/null || true
 }
 
+# Flag to track whether logging to file is ready (LOG_DIR resolved to absolute path)
+_LOG_TO_FILE_READY=false
+
 log_to_file() {
     local line="$1"
-    safe_mkdir "$LOG_DIR"
-    echo -e "$line" >> "$LOG_DIR/data_cleaning.log" 2>/dev/null || true
+    # Only write to file if logging is ready (LOG_DIR is absolute and set up)
+    # This prevents early writes to relative paths before set_defaults runs
+    if [[ "$_LOG_TO_FILE_READY" == "true" && -n "$LOG_DIR" ]]; then
+        safe_mkdir "$LOG_DIR"
+        echo -e "$line" >> "$LOG_DIR/data_cleaning.log" 2>/dev/null || true
+    fi
+}
+
+enable_file_logging() {
+    _LOG_TO_FILE_READY=true
 }
 
 # Logging functions
@@ -492,9 +503,12 @@ check_prerequisites() {
 
 # Setup directories
 setup_directories() {
+    # Now that LOG_DIR is resolved to absolute path, enable file logging
+    safe_mkdir "$LOG_DIR"
+    enable_file_logging
+    
     log "Setting up directories..."
     safe_mkdir "$OUTPUT_DIR"
-    safe_mkdir "$LOG_DIR"
     safe_mkdir "$OUTPUT_DIR/reports"
     info "Output directory: $OUTPUT_DIR"
 }

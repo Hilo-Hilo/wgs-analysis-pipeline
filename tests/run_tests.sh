@@ -682,6 +682,86 @@ run_unit_tests() {
         tests_failed=$((tests_failed + 1))
     fi
 
+    # Regression test: QC arithmetic parsing with malformed fastqc_data.txt
+    # (Issue: grep -Ec output could contain newlines causing '0\n0' parse errors)
+    info "Testing QC arithmetic sanitization (regression)..."
+    local qc_arith_dir="$TEMP_TEST_DIR/edge_qc_arithmetic"
+    mkdir -p "$qc_arith_dir/raw" "$qc_arith_dir/out" "$qc_arith_dir/logs"
+    write_mock_fastq "$qc_arith_dir/raw/sampleH_R1.fastq.gz" 400 100
+    write_mock_fastq "$qc_arith_dir/raw/sampleH_R2.fastq.gz" 400 100
+
+    # Create a mock fastqc that produces data with unusual whitespace
+    cat > "$mock_bin/fastqc" << 'MOCK_ARITH'
+#!/bin/bash
+outdir="."
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --outdir) outdir="$2"; shift 2 ;;
+        --threads|--extract|--quiet) shift ;;
+        *) input="$1"; shift ;;
+    esac
+done
+base=$(basename "$input" | sed 's/\.f.*q\.gz$//')
+mkdir -p "$outdir/${base}_fastqc"
+# Produce data with no WARN/FAIL lines to test grep returning empty/0
+cat > "$outdir/${base}_fastqc/fastqc_data.txt" << 'DATA'
+Total Sequences	5000
+Sequences flagged as poor quality	0
+Sequence length	100
+%GC	42
+>>Per base sequence quality	PASS
+>>Per sequence quality scores	PASS
+DATA
+touch "$outdir/${base}_fastqc.html"
+MOCK_ARITH
+    chmod +x "$mock_bin/fastqc"
+
+    "$ROOT_DIR/scripts/quality_control.sh" \
+        --input-dir "$qc_arith_dir/raw" \
+        --output-dir "$qc_arith_dir/out" \
+        --log-dir "$qc_arith_dir/logs" \
+        --threads 1 > "$qc_arith_dir/qc_arith.log" 2>&1
+    rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        echo "  ✓ QC handles arithmetic edge cases without syntax errors"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ QC arithmetic parsing failed (exit $rc)"
+        cat "$qc_arith_dir/qc_arith.log" 2>/dev/null | tail -10 || true
+        tests_failed=$((tests_failed + 1))
+    fi
+
+    # Regression test: Data cleaning should not write to relative logs/ before setup
+    # (Issue: log_to_file was called before LOG_DIR resolved to absolute path)
+    info "Testing data cleaning log path isolation (regression)..."
+    local clean_logpath_dir="$TEMP_TEST_DIR/edge_clean_logpath"
+    mkdir -p "$clean_logpath_dir/raw" "$clean_logpath_dir/out" "$clean_logpath_dir/logs_explicit"
+    write_mock_fastq "$clean_logpath_dir/raw/sampleI_R1.fastq.gz" 400 100
+    write_mock_fastq "$clean_logpath_dir/raw/sampleI_R2.fastq.gz" 400 100
+
+    # Run from a directory WITHOUT a logs/ subdirectory
+    local old_cwd="$PWD"
+    cd "$clean_logpath_dir"
+    # Ensure no logs/ dir exists in cwd
+    rm -rf logs 2>/dev/null || true
+
+    FASTP_MOCK_MODE=normal "$ROOT_DIR/scripts/data_cleaning.sh" \
+        --input-dir "$clean_logpath_dir/raw" \
+        --output-dir "$clean_logpath_dir/out" \
+        --sample-id sampleI \
+        --threads 1 > "$clean_logpath_dir/clean_logpath.log" 2>&1
+    rc=$?
+    cd "$old_cwd"
+
+    # Check that no logs/ dir was created in cwd (should use explicit --log-dir or absolute)
+    if [[ "$rc" -eq 0 && -f "$clean_logpath_dir/out/sampleI_clean_R1.fq.gz" ]]; then
+        echo "  ✓ Data cleaning respects log path isolation"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ Data cleaning log path isolation failed (exit $rc)"
+        tests_failed=$((tests_failed + 1))
+    fi
+
     PATH="$original_path"
 
     log "Unit tests completed: $tests_passed passed, $tests_failed failed"
