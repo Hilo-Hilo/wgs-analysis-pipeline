@@ -510,8 +510,14 @@ analyze_results() {
     sequence_length=$(awk -F'\t' '$1=="Sequence length"{print $2}' "$data_file" | head -1)
     gc_content=$(awk -F'\t' '$1=="%GC"{print $2}' "$data_file" | head -1)
 
-    warnings=$(grep -Ec '^>>.*\tWARN$' "$data_file" 2>/dev/null || true)
-    failures=$(grep -Ec '^>>.*\tFAIL$' "$data_file" 2>/dev/null || true)
+    # Use grep -c with proper tab matching; sanitize to integer to avoid arithmetic errors
+    warnings=$(grep -c $'^>>.*\tWARN$' "$data_file" 2>/dev/null || echo "0")
+    failures=$(grep -c $'^>>.*\tFAIL$' "$data_file" 2>/dev/null || echo "0")
+    # Strip any whitespace/newlines and ensure numeric
+    warnings="${warnings//[^0-9]/}"
+    failures="${failures//[^0-9]/}"
+    warnings="${warnings:-0}"
+    failures="${failures:-0}"
 
     total_sequences=${total_sequences:-unknown}
     poor_quality=${poor_quality:-unknown}
@@ -585,8 +591,11 @@ generate_summary() {
                 poor_quality=$(awk -F'\t' '$1=="Sequences flagged as poor quality"{print $2}' "$metric_file" | head -1)
                 sequence_length=$(awk -F'\t' '$1=="Sequence length"{print $2}' "$metric_file" | head -1)
                 gc_content=$(awk -F'\t' '$1=="%GC"{print $2}' "$metric_file" | head -1)
-                warnings=$(grep -Ec '^>>.*\tWARN$' "$metric_file" 2>/dev/null || true)
-                failures=$(grep -Ec '^>>.*\tFAIL$' "$metric_file" 2>/dev/null || true)
+                warnings=$(grep -c $'^>>.*\tWARN$' "$metric_file" 2>/dev/null || echo "0")
+                failures=$(grep -c $'^>>.*\tFAIL$' "$metric_file" 2>/dev/null || echo "0")
+                # Sanitize to integers
+                warnings="${warnings//[^0-9]/}"
+                failures="${failures//[^0-9]/}"
 
                 echo "- Total sequences: ${total_sequences:-unknown}"
                 echo "- Poor quality sequences: ${poor_quality:-unknown}"
