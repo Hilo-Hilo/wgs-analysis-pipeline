@@ -21,6 +21,9 @@ NC='\033[0m'
 # Default configuration
 DEFAULT_THREADS=4
 DEFAULT_SAMPLE_ID="WGS_SAMPLE"
+DEFAULT_USE_GPU=false
+DEFAULT_GPU_ALIGNER="parabricks"
+DEFAULT_GPU_COUNT=1
 ENABLE_NOTIFICATIONS=false
 EMAIL_ADDRESS=""
 SLACK_WEBHOOK=""
@@ -42,6 +45,9 @@ OPTIONS:
     -t, --threads NUM           Number of threads (default: 4)
     -i, --input-dir DIR         Input directory with raw FASTQ files
     -o, --output-dir DIR        Output directory (default: results)
+    --use-gpu                   Use GPU alignment for alignment step
+    --gpu-aligner NAME          GPU aligner backend (default: parabricks)
+    --gpu-count NUM             Number of GPUs for alignment step (default: 1)
     --resume-from STEP          Resume pipeline from specific step
     --notify-email EMAIL        Send email notifications
     --notify-slack WEBHOOK      Send Slack notifications
@@ -67,6 +73,9 @@ EXAMPLES:
 
     # Resume from alignment step
     $0 --resume-from alignment
+
+    # Use GPU alignment on DGX (alignment step only)
+    $0 --sample-id MySample --input-dir data/raw --use-gpu --gpu-aligner parabricks --gpu-count 1
 
     # Run specific steps only
     $0 --steps quality-control,data-cleaning
@@ -98,6 +107,18 @@ parse_arguments() {
                 ;;
             -o|--output-dir)
                 OUTPUT_DIR="$2"
+                shift 2
+                ;;
+            --use-gpu)
+                USE_GPU=true
+                shift
+                ;;
+            --gpu-aligner)
+                GPU_ALIGNER="$2"
+                shift 2
+                ;;
+            --gpu-count)
+                GPU_COUNT="$2"
                 shift 2
                 ;;
             --resume-from)
@@ -149,6 +170,9 @@ set_defaults() {
     THREADS="${THREADS:-$DEFAULT_THREADS}"
     INPUT_DIR="${INPUT_DIR:-data/raw}"
     OUTPUT_DIR="${OUTPUT_DIR:-results}"
+    USE_GPU="${USE_GPU:-$DEFAULT_USE_GPU}"
+    GPU_ALIGNER="${GPU_ALIGNER:-$DEFAULT_GPU_ALIGNER}"
+    GPU_COUNT="${GPU_COUNT:-$DEFAULT_GPU_COUNT}"
     DRY_RUN="${DRY_RUN:-false}"
     VERBOSE="${VERBOSE:-false}"
     ASSUME_YES="${ASSUME_YES:-false}"
@@ -225,7 +249,15 @@ run_pipeline_step() {
         "quality-control"|"data-cleaning")
             cmd_args+=(--input-dir "$INPUT_DIR")
             ;;
-        "alignment"|"variant-calling"|"annotation")
+        "alignment")
+            cmd_args+=(--output-dir "$OUTPUT_DIR")
+            if [[ "$USE_GPU" == "true" ]]; then
+                cmd_args+=(--use-gpu)
+                cmd_args+=(--gpu-aligner "$GPU_ALIGNER")
+                cmd_args+=(--gpu-count "$GPU_COUNT")
+            fi
+            ;;
+        "variant-calling"|"annotation")
             cmd_args+=(--output-dir "$OUTPUT_DIR")
             ;;
     esac
@@ -321,6 +353,11 @@ show_pipeline_summary() {
     printf "Input Directory: %s\n" "$INPUT_DIR"
     printf "Output Directory: %s\n" "$OUTPUT_DIR"
     printf "Steps to Run: %s\n" "${STEP_ORDER[*]}"
+    if [[ "$USE_GPU" == "true" ]]; then
+        printf "Alignment Mode: GPU (%s, %s GPU)\n" "$GPU_ALIGNER" "$GPU_COUNT"
+    else
+        printf "Alignment Mode: CPU (BWA)\n"
+    fi
     
     if [[ "$ENABLE_NOTIFICATIONS" == "true" ]]; then
         printf "Notifications: Enabled"

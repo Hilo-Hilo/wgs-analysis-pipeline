@@ -243,6 +243,18 @@ run_unit_tests() {
         tests_failed=$((tests_failed + 1))
     fi
 
+    # Test 5: GPU flag discoverability (help text)
+    info "Testing GPU flag discoverability..."
+    if "$ROOT_DIR/scripts/alignment.sh" --help 2>/dev/null | grep -q -- "--use-gpu" \
+       && "$ROOT_DIR/scripts/alignment.sh" --help 2>/dev/null | grep -q -- "--gpu-aligner" \
+       && "$ROOT_DIR/scripts/alignment.sh" --help 2>/dev/null | grep -q -- "--gpu-count"; then
+        echo "  ✓ GPU flags documented in help output"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ GPU flags missing from help output"
+        tests_failed=$((tests_failed + 1))
+    fi
+
     log "Unit tests completed: $tests_passed passed, $tests_failed failed"
     return $tests_failed
 }

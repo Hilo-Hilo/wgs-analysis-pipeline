@@ -44,6 +44,23 @@ If failures persist, verify DNS/network egress to `conda.anaconda.org`.
 
 Note: the base Docker image intentionally excludes `vep` to avoid pulling legacy/incompatible toolchains on ARM. `vep` is optional and only needed for the annotation step.
 
+### GPU alignment fails on DGX
+
+GPU mode requires both NVIDIA runtime and Parabricks:
+
+```bash
+nvidia-smi
+which pbrun
+```
+
+Run alignment in GPU mode explicitly:
+
+```bash
+./scripts/alignment.sh --use-gpu --gpu-aligner parabricks --gpu-count 1 --threads 32
+```
+
+If either `nvidia-smi` or `pbrun` is missing, alignment now fails fast with an actionable error and you can rerun in CPU mode by dropping `--use-gpu`.
+
 ### Out of memory / process killed
 
 Reduce threads (each thread uses more RAM):

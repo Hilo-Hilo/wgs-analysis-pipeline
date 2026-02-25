@@ -21,8 +21,11 @@ A memory-optimized whole-genome sequencing analysis pipeline for variant discove
 - **Disk:** 400 GB free (SSD recommended)
 - **CPU:** 4+ cores
 
-The pipeline installs all bioinformatics tools via conda:
-FastQC, fastp, BWA, SAMtools, BCFtools, Ensembl VEP.
+Core pipeline tools are installed via conda:
+FastQC, fastp, BWA, SAMtools, BCFtools.
+
+`vep` is optional (annotation step only) and may be installed separately on
+platforms where base environments prioritize toolchain stability.
 
 ## Quick Start
 
@@ -33,6 +36,24 @@ bash scripts/check_requirements.sh          # verify dependencies
 # place paired FASTQ files in data/raw/
 bash run_pipeline.sh -1 data/raw/R1.fastq.gz -2 data/raw/R2.fastq.gz
 ```
+
+## DGX GPU Alignment (Optional)
+
+Alignment defaults to CPU BWA. On DGX systems you can enable GPU alignment
+for the alignment step using Parabricks:
+
+```bash
+bash run_pipeline.sh \
+  --sample-id E200032534 \
+  --input-dir /workspace/genetic-data/01-raw-reads/wgs_analysis \
+  --output-dir /workspace/genetic-data \
+  --use-gpu --gpu-aligner parabricks --gpu-count 1 --steps alignment
+```
+
+Notes:
+- `--use-gpu` only affects the `alignment` step.
+- Requires `nvidia-smi` and `pbrun` in PATH.
+- If GPU flags are not provided, pipeline uses CPU BWA path.
 
 ## Pipeline Stages
 
@@ -112,7 +133,7 @@ CI runs automatically via GitHub Actions (`.github/workflows/test.yml`).
 │   ├── check_requirements.sh    # Dependency/system validation
 │   ├── quality_control.sh       # FastQC
 │   ├── data_cleaning.sh         # fastp trimming
-│   ├── alignment.sh             # BWA + SAMtools
+│   ├── alignment.sh             # CPU BWA or GPU Parabricks
 │   ├── variant_calling.sh       # BCFtools
 │   ├── vep_annotation.sh        # Ensembl VEP
 │   ├── load_config.sh           # Config loader

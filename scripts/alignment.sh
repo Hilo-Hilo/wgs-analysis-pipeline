@@ -15,6 +15,9 @@ source config/default.conf
 
 # Track CLI overrides explicitly
 CLI_SAMPLE_ID=""
+CLI_USE_GPU=""
+CLI_GPU_ALIGNER=""
+CLI_GPU_COUNT=""
 
 # Help function
 show_help() {
@@ -22,8 +25,9 @@ show_help() {
 $SCRIPT_NAME v$SCRIPT_VERSION - 16GB RAM Optimized WGS Alignment
 
 DESCRIPTION:
-    Performs read mapping to GRCh38 reference genome using BWA.
-    Optimized for 16GB RAM systems with conservative memory usage.
+    Performs read mapping to GRCh38 reference genome.
+    Default path uses BWA + samtools (CPU). Optional GPU mode uses
+    Parabricks on DGX-class systems.
 
 USAGE:
     $0 [OPTIONS]
@@ -35,6 +39,9 @@ OPTIONS:
     -o, --output-dir DIR    Output directory (default: results/alignment)
     -s, --sample-id ID      Sample identifier (default: from config)
     -t, --threads NUM       Number of threads (default: 4 for 16GB systems)
+    --use-gpu               Enable GPU alignment mode (DGX/Parabricks)
+    --gpu-aligner NAME      GPU aligner backend (default: parabricks)
+    --gpu-count NUM         Number of GPUs to use (default: 1)
     --dry-run               Show what would be done without executing
     --force                 Overwrite existing output files
     --verbose               Enable verbose output
@@ -56,8 +63,12 @@ EXAMPLES:
     # Dry run to check parameters
     $0 --dry-run --verbose
 
+    # DGX GPU alignment with Parabricks
+    $0 --use-gpu --gpu-aligner parabricks --gpu-count 1 --threads 32
+
 REQUIREMENTS:
-    - BWA and samtools installed
+    - CPU mode: BWA and samtools installed
+    - GPU mode: nvidia-smi + pbrun (Parabricks) installed
     - GRCh38 reference genome indexed with BWA
     - Cleaned FASTQ files from quality control step
     - 16GB RAM, 200GB free disk space
@@ -113,6 +124,21 @@ parse_arguments() {
                 THREADS="$2"
                 shift 2
                 ;;
+            --use-gpu)
+                CLI_USE_GPU="true"
+                USE_GPU=true
+                shift
+                ;;
+            --gpu-aligner)
+                CLI_GPU_ALIGNER="$2"
+                GPU_ALIGNER="$2"
+                shift 2
+                ;;
+            --gpu-count)
+                CLI_GPU_COUNT="$2"
+                GPU_COUNT="$2"
+                shift 2
+                ;;
             --dry-run)
                 DRY_RUN=true
                 shift
@@ -159,12 +185,40 @@ set_defaults() {
     INPUT_DIR="${INPUT_DIR:-${PROCESSED_DATA_DIR}}"
     REFERENCE_GENOME="${REFERENCE_GENOME:-${GRCH38_REFERENCE}}"
     OUTPUT_DIR="${OUTPUT_DIR:-results/alignment}"
+
     if [[ -n "${CLI_SAMPLE_ID:-}" ]]; then
         SAMPLE_ID="$CLI_SAMPLE_ID"
     else
         SAMPLE_ID="${SAMPLE_ID:-LOCAL_SAMPLE}"
     fi
+
     THREADS="${THREADS:-${BWA_THREADS:-4}}"
+
+    # GPU alignment defaults
+    if [[ -n "${CLI_USE_GPU:-}" ]]; then
+        USE_GPU="$CLI_USE_GPU"
+    else
+        USE_GPU="${USE_GPU:-${ALIGNMENT_USE_GPU:-false}}"
+    fi
+
+    if [[ -n "${CLI_GPU_ALIGNER:-}" ]]; then
+        GPU_ALIGNER="$CLI_GPU_ALIGNER"
+    else
+        GPU_ALIGNER="${GPU_ALIGNER:-${GPU_ALIGNER_DEFAULT:-parabricks}}"
+    fi
+
+    if [[ -n "${CLI_GPU_COUNT:-}" ]]; then
+        GPU_COUNT="$CLI_GPU_COUNT"
+    else
+        GPU_COUNT="${GPU_COUNT:-${GPU_COUNT_DEFAULT:-1}}"
+    fi
+
+    if [[ "$USE_GPU" == "true" ]]; then
+        ALIGNMENT_METHOD="gpu-${GPU_ALIGNER}"
+    else
+        ALIGNMENT_METHOD="cpu-bwa"
+    fi
+
     DRY_RUN="${DRY_RUN:-false}"
     FORCE_OVERWRITE="${FORCE_OVERWRITE:-false}"
     VERBOSE="${VERBOSE:-false}"
@@ -211,14 +265,16 @@ detect_input_files() {
 # Check prerequisites
 check_prerequisites() {
     log "Checking prerequisites for alignment..."
-    
-    # Check BWA
-    if ! command -v bwa &> /dev/null; then
-        error "BWA not found. Install with: conda install -c bioconda bwa"
-        exit 1
+
+    # CPU mode requires bwa; GPU mode uses pbrun
+    if [[ "$USE_GPU" != "true" ]]; then
+        if ! command -v bwa &> /dev/null; then
+            error "BWA not found. Install with: conda install -c bioconda bwa"
+            exit 1
+        fi
     fi
-    
-    # Check samtools
+
+    # samtools still required for indexing/stats output
     if ! command -v samtools &> /dev/null; then
         error "samtools not found. Install with: conda install -c bioconda samtools"
         exit 1
@@ -233,6 +289,31 @@ check_prerequisites() {
     if [[ "$samtools_version" =~ ^0\. ]]; then
         error "Detected legacy samtools ${samtools_version}. Please install samtools >=1.10 (legacy 0.1.x can crash during alignment sort)."
         exit 1
+    fi
+
+    if [[ "$USE_GPU" == "true" ]]; then
+        if ! command -v nvidia-smi &> /dev/null; then
+            error "GPU mode requested but nvidia-smi not found. Use CPU mode or run on NVIDIA host."
+            exit 1
+        fi
+
+        if ! [[ "$GPU_COUNT" =~ ^[0-9]+$ ]] || [[ "$GPU_COUNT" -lt 1 ]]; then
+            error "Invalid --gpu-count '$GPU_COUNT' (must be positive integer)"
+            exit 1
+        fi
+
+        case "$GPU_ALIGNER" in
+            parabricks)
+                if ! command -v pbrun &> /dev/null; then
+                    error "GPU aligner 'parabricks' selected but pbrun not found in PATH."
+                    exit 1
+                fi
+                ;;
+            *)
+                error "Unsupported --gpu-aligner '$GPU_ALIGNER' (supported: parabricks)"
+                exit 1
+                ;;
+        esac
     fi
     
     # Check reference genome
@@ -279,6 +360,61 @@ setup_directories() {
     log "Setting up directories..."
     mkdir -p "$OUTPUT_DIR" "$LOG_DIR"
     info "Output directory: $OUTPUT_DIR"
+}
+
+# Run GPU alignment (Parabricks)
+run_gpu_alignment() {
+    log "Starting GPU alignment..."
+
+    local bam_output="$OUTPUT_DIR/${SAMPLE_ID}_aligned_sorted.bam"
+    local rg="@RG\tID:${SAMPLE_ID}\tSM:${SAMPLE_ID}\tPL:ILLUMINA\tLB:WGS\tPU:${SAMPLE_ID}"
+
+    if [[ -f "$bam_output" && "$FORCE_OVERWRITE" != "true" ]]; then
+        warning "Aligned BAM already exists: $bam_output"
+        echo "Use --force to overwrite"
+        return 0
+    fi
+
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo "Would run GPU alignment with:"
+        echo "  Aligner: $GPU_ALIGNER"
+        echo "  GPUs: $GPU_COUNT"
+        echo "  Input R1: $CLEANED_R1"
+        echo "  Input R2: $CLEANED_R2"
+        echo "  Output: $bam_output"
+        return 0
+    fi
+
+    case "$GPU_ALIGNER" in
+        parabricks)
+            info "Running Parabricks fq2bam (GPUs: $GPU_COUNT)..."
+            mkdir -p "$OUTPUT_DIR/tmp"
+
+            local -a pb_cmd=(
+                pbrun fq2bam
+                --ref "$REFERENCE_GENOME"
+                --in-fq "$CLEANED_R1" "$CLEANED_R2" "$rg"
+                --out-bam "$bam_output"
+                --num-gpus "$GPU_COUNT"
+                --tmp-dir "$OUTPUT_DIR/tmp"
+            )
+
+            if "${pb_cmd[@]}" 2>>"$LOG_DIR/alignment.log"; then
+                log "Parabricks GPU alignment completed successfully"
+            else
+                error "Parabricks GPU alignment failed"
+                return 1
+            fi
+            ;;
+        *)
+            error "Unsupported GPU aligner: $GPU_ALIGNER"
+            return 1
+            ;;
+    esac
+
+    local bam_size
+    bam_size=$(du -h "$bam_output" | cut -f1)
+    log "Aligned BAM file size: $bam_size"
 }
 
 # Run BWA alignment (16GB optimized)
@@ -434,18 +570,19 @@ generate_summary() {
     cat > "$summary_file" << EOF
 # WGS Alignment Summary - $SAMPLE_ID
 # Generated: $(date)
-# Tool: BWA with 16GB RAM optimizations
+# Mode: $ALIGNMENT_METHOD
 
 ## Input Files:
 - Reference: $REFERENCE_GENOME
 - Forward reads: $CLEANED_R1
 - Reverse reads: $CLEANED_R2
 
-## Alignment Parameters (16GB Optimized):
-- Tool: BWA-MEM v$(bwa 2>&1 | grep Version | awk '{print $2}' || echo "unknown")
+## Alignment Parameters:
+- Mode: $ALIGNMENT_METHOD
+- Tool: $(if [[ "$USE_GPU" == "true" ]]; then echo "Parabricks (pbrun fq2bam)"; else echo "BWA-MEM v$(bwa 2>&1 | grep Version | awk '{print $2}' || echo unknown)"; fi)
 - samtools: v$(samtools --version | head -1 | awk '{print $2}' || echo "unknown")
 - Threads: $THREADS
-- Memory limit: 10GB
+- GPUs: $GPU_COUNT
 - Sample ID: $SAMPLE_ID
 
 ## Output Files:
@@ -523,8 +660,14 @@ main() {
     info "Sample ID: $SAMPLE_ID"
     info "Reference: $REFERENCE_GENOME"
     info "Output directory: $OUTPUT_DIR"
-    info "Threads: $THREADS (16GB optimized)"
-    info "Memory conservative mode enabled"
+    info "Threads: $THREADS"
+    info "Alignment mode: $ALIGNMENT_METHOD"
+    if [[ "$USE_GPU" == "true" ]]; then
+        info "GPU aligner: $GPU_ALIGNER"
+        info "GPU count: $GPU_COUNT"
+    else
+        info "Memory conservative CPU mode enabled"
+    fi
     
     detect_input_files
     check_prerequisites
@@ -535,7 +678,12 @@ main() {
         exit 0
     fi
     
-    run_bwa_alignment || exit 1
+    if [[ "$USE_GPU" == "true" ]]; then
+        run_gpu_alignment || exit 1
+    else
+        run_bwa_alignment || exit 1
+    fi
+
     index_bam || exit 1
     generate_statistics || exit 1
     generate_summary
