@@ -37,6 +37,26 @@ bash scripts/check_requirements.sh          # verify dependencies
 bash run_pipeline.sh --sample-id MySample --input-dir data/raw --output-dir results
 ```
 
+## Unified CLI Wrapper (`wgs`)
+
+Use `wgs` for a cleaner command UX and typo suggestions:
+
+```bash
+# Show all commands
+./wgs --help
+
+# Run full pipeline (flags after -- are passed through)
+./wgs run -- --sample-id MySample --input-dir data/raw
+
+# Run requirement checks
+./wgs check -- --min-ram 16 --min-disk 400
+```
+
+Notes:
+- `wgs run` requires GNU Bash 4+ (same requirement as `run_pipeline.sh`).
+- On macOS, install modern bash (e.g. `brew install bash`) and optionally set:
+  `WGS_BASH_BIN=/opt/homebrew/bin/bash`
+
 ## DGX GPU Alignment (Optional)
 
 Alignment defaults to CPU BWA. On DGX systems you can enable GPU alignment

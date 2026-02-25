@@ -255,6 +255,118 @@ run_unit_tests() {
         tests_failed=$((tests_failed + 1))
     fi
 
+    # Test 6: run_pipeline help UX quality
+    info "Testing run_pipeline help content..."
+    local run_help_log="$TEMP_TEST_DIR/logs/run_pipeline_help.log"
+    if bash "$ROOT_DIR/run_pipeline.sh" --help > "$run_help_log" 2>&1 \
+       && grep -q "SHELL COMPATIBILITY" "$run_help_log" \
+       && grep -q "EXAMPLES:" "$run_help_log"; then
+        echo "  ✓ run_pipeline help includes compatibility guidance + examples"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ run_pipeline help output missing expected UX sections"
+        warning "    See $run_help_log"
+        tests_failed=$((tests_failed + 1))
+    fi
+
+    # Test 7: run_pipeline invalid flag suggestion
+    info "Testing run_pipeline invalid option suggestions..."
+    local invalid_opt_log="$TEMP_TEST_DIR/logs/run_pipeline_invalid_option.log"
+    if bash "$ROOT_DIR/run_pipeline.sh" --threds 4 > "$invalid_opt_log" 2>&1; then
+        echo "  ✗ run_pipeline unexpectedly accepted misspelled option"
+        tests_failed=$((tests_failed + 1))
+    elif grep -q "did you mean '--threads'" "$invalid_opt_log"; then
+        echo "  ✓ run_pipeline suggests likely option for misspelled flags"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ run_pipeline did not provide a helpful suggestion"
+        warning "    See $invalid_opt_log"
+        tests_failed=$((tests_failed + 1))
+    fi
+
+    # Test 8: shell compatibility execution-path messaging (bash3 vs bash4+)
+    info "Testing shell compatibility execution messaging..."
+    local compat_log="$TEMP_TEST_DIR/logs/run_pipeline_compat.log"
+    local default_bash_major
+    default_bash_major="$(bash -lc 'echo ${BASH_VERSINFO[0]:-0}' 2>/dev/null || echo 0)"
+
+    if bash "$ROOT_DIR/run_pipeline.sh" --dry-run --skip-requirements-check --steps quality-control > "$compat_log" 2>&1; then
+        if [[ "$default_bash_major" -ge 4 ]]; then
+            echo "  ✓ run_pipeline executes with default bash>=4"
+            tests_passed=$((tests_passed + 1))
+        else
+            echo "  ✗ run_pipeline unexpectedly succeeded under bash $default_bash_major"
+            warning "    See $compat_log"
+            tests_failed=$((tests_failed + 1))
+        fi
+    else
+        if [[ "$default_bash_major" -lt 4 ]] && grep -q "requires GNU Bash 4.0 or newer" "$compat_log"; then
+            echo "  ✓ run_pipeline shows clear Bash 4+ compatibility guidance"
+            tests_passed=$((tests_passed + 1))
+        else
+            echo "  ✗ run_pipeline compatibility behavior unexpected"
+            warning "    See $compat_log"
+            tests_failed=$((tests_failed + 1))
+        fi
+    fi
+
+    # Test 9: wgs unknown command suggestion
+    info "Testing wgs unknown command suggestions..."
+    local wgs_unknown_log="$TEMP_TEST_DIR/logs/wgs_unknown_command.log"
+    if python3 "$ROOT_DIR/wgs" rn > "$wgs_unknown_log" 2>&1; then
+        echo "  ✗ wgs unexpectedly accepted unknown command"
+        tests_failed=$((tests_failed + 1))
+    elif grep -q "Did you mean 'run'" "$wgs_unknown_log"; then
+        echo "  ✓ wgs suggests closest command for typos"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ wgs did not provide command suggestion"
+        warning "    See $wgs_unknown_log"
+        tests_failed=$((tests_failed + 1))
+    fi
+
+    # Test 10: wgs subcommand help forwarding
+    info "Testing wgs help forwarding..."
+    local wgs_check_help_log="$TEMP_TEST_DIR/logs/wgs_check_help.log"
+    if python3 "$ROOT_DIR/wgs" check --help > "$wgs_check_help_log" 2>&1 \
+       && grep -q "WGS Analysis Requirements Checker" "$wgs_check_help_log"; then
+        echo "  ✓ wgs forwards subcommand help to underlying script"
+        tests_passed=$((tests_passed + 1))
+    else
+        echo "  ✗ wgs subcommand help forwarding failed"
+        warning "    See $wgs_check_help_log"
+        tests_failed=$((tests_failed + 1))
+    fi
+
+    # Test 11: wgs run shell-compatibility messaging
+    info "Testing wgs run compatibility messaging/help behavior..."
+    local wgs_run_help_log="$TEMP_TEST_DIR/logs/wgs_run_help.log"
+    if python3 "$ROOT_DIR/wgs" run --help > "$wgs_run_help_log" 2>&1; then
+        if [[ "$default_bash_major" -ge 4 ]]; then
+            if grep -q "WGS Pipeline Runner" "$wgs_run_help_log"; then
+                echo "  ✓ wgs run --help reaches pipeline help on bash>=4"
+                tests_passed=$((tests_passed + 1))
+            else
+                echo "  ✗ wgs run --help succeeded but output missing pipeline help"
+                warning "    See $wgs_run_help_log"
+                tests_failed=$((tests_failed + 1))
+            fi
+        else
+            echo "  ✗ wgs run --help unexpectedly succeeded under bash $default_bash_major"
+            warning "    See $wgs_run_help_log"
+            tests_failed=$((tests_failed + 1))
+        fi
+    else
+        if [[ "$default_bash_major" -lt 4 ]] && grep -q "No compatible Bash (>=4)" "$wgs_run_help_log"; then
+            echo "  ✓ wgs run shows actionable Bash 4+ guidance"
+            tests_passed=$((tests_passed + 1))
+        else
+            echo "  ✗ wgs run compatibility messaging unexpected"
+            warning "    See $wgs_run_help_log"
+            tests_failed=$((tests_failed + 1))
+        fi
+    fi
+
     log "Unit tests completed: $tests_passed passed, $tests_failed failed"
     return $tests_failed
 }

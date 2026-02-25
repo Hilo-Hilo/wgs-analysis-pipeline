@@ -1,23 +1,12 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # WGS Pipeline Runner with Progress Monitoring
 # Enhanced pipeline execution with real-time progress tracking and resource monitoring
 
 set -e
 
-# Require Bash 4+ (associative arrays used by progress monitor)
-if [[ -z "${BASH_VERSINFO:-}" || "${BASH_VERSINFO[0]}" -lt 4 ]]; then
-    echo "❌ run_pipeline.sh requires Bash 4 or newer."
-    echo "   Detected: ${BASH_VERSION:-unknown}"
-    echo "   On macOS, install newer bash (e.g. via Homebrew) and run with that binary."
-    exit 1
-fi
-
 # Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Source progress monitoring
-source "$SCRIPT_DIR/scripts/progress_monitor.sh"
 
 # Colors for output
 RED='\033[0;31m'
@@ -39,6 +28,146 @@ RESUME_FROM=""
 ASSUME_YES=false
 SKIP_REQUIREMENTS_CHECK=false
 
+# Valid CLI options for suggestions/validation
+VALID_OPTIONS=(
+    -h --help
+    -s --sample-id
+    -t --threads
+    -i --input-dir
+    -o --output-dir
+    --use-gpu
+    --gpu-aligner
+    --gpu-count
+    --resume-from
+    --notify-email
+    --notify-slack
+    --steps
+    -y --yes
+    --skip-requirements-check
+    --dry-run
+    --verbose
+)
+
+AVAILABLE_STEPS=(
+    "quality-control"
+    "data-cleaning"
+    "alignment"
+    "variant-calling"
+    "annotation"
+)
+
+trim() {
+    local value="$1"
+    # shellcheck disable=SC2001
+    value="$(echo "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    printf '%s' "$value"
+}
+
+suggest_closest() {
+    local needle="$1"
+    shift || true
+
+    if [[ $# -eq 0 ]]; then
+        return 0
+    fi
+
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - "$needle" "$@" <<'PY'
+import difflib
+import sys
+
+needle = sys.argv[1]
+candidates = sys.argv[2:]
+match = difflib.get_close_matches(needle, candidates, n=1, cutoff=0.45)
+if match:
+    print(match[0])
+PY
+    fi
+}
+
+print_cli_error() {
+    local message="$1"
+    echo -e "${RED}❌ ${message}${NC}" >&2
+    echo "Run '$0 --help' for usage and examples." >&2
+}
+
+unknown_option_error() {
+    local bad_opt="$1"
+    local suggestion
+    suggestion="$(suggest_closest "$bad_opt" "${VALID_OPTIONS[@]}")"
+
+    if [[ -n "$suggestion" ]]; then
+        print_cli_error "Unknown option: $bad_opt (did you mean '$suggestion'?)"
+    else
+        print_cli_error "Unknown option: $bad_opt"
+    fi
+    exit 2
+}
+
+missing_value_error() {
+    local opt="$1"
+    print_cli_error "Option '$opt' requires a value."
+    exit 2
+}
+
+normalize_step_name() {
+    local step
+    step="$(trim "$1")"
+    case "$step" in
+        quality_control) echo "quality-control" ;;
+        data_cleaning) echo "data-cleaning" ;;
+        variant_calling) echo "variant-calling" ;;
+        *) echo "$step" ;;
+    esac
+}
+
+require_bash4_or_die() {
+    local major="${BASH_VERSINFO[0]:-0}"
+
+    if [[ -z "${BASH_VERSION:-}" || "$major" -lt 4 ]]; then
+        echo -e "${RED}❌ run_pipeline.sh requires GNU Bash 4.0 or newer.${NC}" >&2
+        echo "Detected shell: ${BASH_VERSION:-unknown}" >&2
+        echo >&2
+        echo "Why this is required:" >&2
+        echo "  - Progress monitoring uses associative arrays (Bash 4+ feature)." >&2
+        echo >&2
+        echo "How to fix on macOS:" >&2
+        echo "  1) Install modern bash (e.g. Homebrew): brew install bash" >&2
+        echo "  2) Run with that binary, for example:" >&2
+        echo "     /opt/homebrew/bin/bash run_pipeline.sh --help" >&2
+        exit 1
+    fi
+}
+
+validate_positive_integer() {
+    local name="$1"
+    local value="$2"
+
+    if [[ ! "$value" =~ ^[1-9][0-9]*$ ]]; then
+        print_cli_error "$name must be a positive integer (got: '$value')."
+        exit 2
+    fi
+}
+
+validate_step_name() {
+    local step="$1"
+    local context="$2"
+
+    if [[ -z "${PIPELINE_STEPS[$step]:-}" ]]; then
+        local suggestion
+        suggestion="$(suggest_closest "$step" "${AVAILABLE_STEPS[@]}")"
+
+        if [[ -n "$suggestion" ]]; then
+            print_cli_error "Invalid ${context}: '$step' (did you mean '$suggestion'?)"
+        else
+            print_cli_error "Invalid ${context}: '$step'"
+        fi
+
+        echo "Available steps: ${AVAILABLE_STEPS[*]}" >&2
+        exit 2
+    fi
+}
+
 # Help function
 show_help() {
     cat << EOF
@@ -47,48 +176,56 @@ WGS Pipeline Runner with Progress Monitoring
 USAGE:
     $0 [OPTIONS]
 
-OPTIONS:
+CORE OPTIONS:
     -h, --help                  Show this help message
     -s, --sample-id ID          Sample identifier (default: WGS_SAMPLE)
     -t, --threads NUM           Number of threads (default: 4)
-    -i, --input-dir DIR         Input directory with raw FASTQ files
+    -i, --input-dir DIR         Input directory with raw FASTQ files (default: data/raw)
     -o, --output-dir DIR        Output directory (default: results)
-    --use-gpu                   Use GPU alignment for alignment step
+    --steps STEPS               Run specific steps only (comma-separated)
+    --resume-from STEP          Resume pipeline from a specific step
+
+GPU OPTIONS (alignment step):
+    --use-gpu                   Enable GPU alignment mode
     --gpu-aligner NAME          GPU aligner backend (default: parabricks)
     --gpu-count NUM             Number of GPUs for alignment step (default: 1)
-    --resume-from STEP          Resume pipeline from specific step
-    --notify-email EMAIL        Send email notifications
-    --notify-slack WEBHOOK      Send Slack notifications
-    --steps STEPS               Run specific steps only (comma-separated)
+
+SAFETY / EXECUTION OPTIONS:
     -y, --yes                   Continue on requirement warnings without prompting
-    --skip-requirements-check   Skip running scripts/check_requirements.sh
+    --skip-requirements-check   Skip scripts/check_requirements.sh
     --dry-run                   Show what would be done without executing
     --verbose                   Enable verbose output
 
+NOTIFICATION OPTIONS:
+    --notify-email EMAIL        Send email notifications
+    --notify-slack WEBHOOK      Send Slack notifications
+
 PIPELINE STEPS:
-    1. quality-control          FastQC analysis of raw reads
-    2. data-cleaning           Adapter trimming and quality filtering
-    3. alignment               BWA mapping to reference genome
-    4. variant-calling         bcftools variant calling
-    5. annotation              VEP variant annotation
+    quality-control             FastQC analysis of raw reads
+    data-cleaning               Adapter trimming and quality filtering
+    alignment                   BWA/Parabricks mapping to reference genome
+    variant-calling             bcftools variant calling
+    annotation                  VEP variant annotation
+
+SHELL COMPATIBILITY:
+    This script requires GNU Bash 4+.
+    macOS ships Bash 3.2 by default, which is not sufficient.
+    Install newer bash (e.g. Homebrew) and run with that binary.
 
 EXAMPLES:
     # Run complete pipeline
     $0 --sample-id MySample --input-dir data/raw
 
-    # Run with notifications
-    $0 --sample-id MySample --notify-email user@example.com
+    # Run with GPU alignment
+    $0 --sample-id MySample --use-gpu --gpu-aligner parabricks --gpu-count 1
 
-    # Resume from alignment step
-    $0 --resume-from alignment
-
-    # Use GPU alignment on DGX (alignment step only)
-    $0 --sample-id MySample --input-dir data/raw --use-gpu --gpu-aligner parabricks --gpu-count 1
-
-    # Run specific steps only
+    # Run only QC + cleaning
     $0 --steps quality-control,data-cleaning
 
-    # Dry run to check configuration
+    # Resume from alignment
+    $0 --resume-from alignment
+
+    # Dry run for configuration validation
     $0 --dry-run --verbose
 EOF
 }
@@ -96,77 +233,167 @@ EOF
 # Parse command line arguments
 parse_arguments() {
     while [[ $# -gt 0 ]]; do
-        case $1 in
+        case "$1" in
             -h|--help)
                 show_help
                 exit 0
                 ;;
+
             -s|--sample-id)
+                [[ $# -lt 2 ]] && missing_value_error "$1"
                 SAMPLE_ID="$2"
                 shift 2
                 ;;
+            --sample-id=*)
+                SAMPLE_ID="${1#*=}"
+                [[ -z "$SAMPLE_ID" ]] && missing_value_error "--sample-id"
+                shift
+                ;;
+
             -t|--threads)
+                [[ $# -lt 2 ]] && missing_value_error "$1"
                 THREADS="$2"
                 shift 2
                 ;;
+            --threads=*)
+                THREADS="${1#*=}"
+                [[ -z "$THREADS" ]] && missing_value_error "--threads"
+                shift
+                ;;
+
             -i|--input-dir)
+                [[ $# -lt 2 ]] && missing_value_error "$1"
                 INPUT_DIR="$2"
                 shift 2
                 ;;
+            --input-dir=*)
+                INPUT_DIR="${1#*=}"
+                [[ -z "$INPUT_DIR" ]] && missing_value_error "--input-dir"
+                shift
+                ;;
+
             -o|--output-dir)
+                [[ $# -lt 2 ]] && missing_value_error "$1"
                 OUTPUT_DIR="$2"
                 shift 2
                 ;;
+            --output-dir=*)
+                OUTPUT_DIR="${1#*=}"
+                [[ -z "$OUTPUT_DIR" ]] && missing_value_error "--output-dir"
+                shift
+                ;;
+
             --use-gpu)
                 USE_GPU=true
                 shift
                 ;;
+
             --gpu-aligner)
+                [[ $# -lt 2 ]] && missing_value_error "$1"
                 GPU_ALIGNER="$2"
                 shift 2
                 ;;
+            --gpu-aligner=*)
+                GPU_ALIGNER="${1#*=}"
+                [[ -z "$GPU_ALIGNER" ]] && missing_value_error "--gpu-aligner"
+                shift
+                ;;
+
             --gpu-count)
+                [[ $# -lt 2 ]] && missing_value_error "$1"
                 GPU_COUNT="$2"
                 shift 2
                 ;;
+            --gpu-count=*)
+                GPU_COUNT="${1#*=}"
+                [[ -z "$GPU_COUNT" ]] && missing_value_error "--gpu-count"
+                shift
+                ;;
+
             --resume-from)
+                [[ $# -lt 2 ]] && missing_value_error "$1"
                 RESUME_FROM="$2"
                 shift 2
                 ;;
+            --resume-from=*)
+                RESUME_FROM="${1#*=}"
+                [[ -z "$RESUME_FROM" ]] && missing_value_error "--resume-from"
+                shift
+                ;;
+
             --notify-email)
+                [[ $# -lt 2 ]] && missing_value_error "$1"
                 EMAIL_ADDRESS="$2"
                 ENABLE_NOTIFICATIONS=true
                 shift 2
                 ;;
+            --notify-email=*)
+                EMAIL_ADDRESS="${1#*=}"
+                [[ -z "$EMAIL_ADDRESS" ]] && missing_value_error "--notify-email"
+                ENABLE_NOTIFICATIONS=true
+                shift
+                ;;
+
             --notify-slack)
+                [[ $# -lt 2 ]] && missing_value_error "$1"
                 SLACK_WEBHOOK="$2"
                 ENABLE_NOTIFICATIONS=true
                 shift 2
                 ;;
+            --notify-slack=*)
+                SLACK_WEBHOOK="${1#*=}"
+                [[ -z "$SLACK_WEBHOOK" ]] && missing_value_error "--notify-slack"
+                ENABLE_NOTIFICATIONS=true
+                shift
+                ;;
+
             --steps)
+                [[ $# -lt 2 ]] && missing_value_error "$1"
                 SPECIFIC_STEPS="$2"
                 shift 2
                 ;;
+            --steps=*)
+                SPECIFIC_STEPS="${1#*=}"
+                [[ -z "$SPECIFIC_STEPS" ]] && missing_value_error "--steps"
+                shift
+                ;;
+
             -y|--yes)
                 ASSUME_YES=true
                 shift
                 ;;
+
             --skip-requirements-check)
                 SKIP_REQUIREMENTS_CHECK=true
                 shift
                 ;;
+
             --dry-run)
                 DRY_RUN=true
                 shift
                 ;;
+
             --verbose)
                 VERBOSE=true
                 shift
                 ;;
+
+            --)
+                # No positional arguments currently supported.
+                shift
+                if [[ $# -gt 0 ]]; then
+                    print_cli_error "Unexpected positional arguments: $*"
+                    exit 2
+                fi
+                ;;
+
+            -*)
+                unknown_option_error "$1"
+                ;;
+
             *)
-                echo "Unknown option: $1"
-                echo "Use --help for usage information"
-                exit 1
+                print_cli_error "Unexpected positional argument: $1"
+                exit 2
                 ;;
         esac
     done
@@ -185,6 +412,9 @@ set_defaults() {
     VERBOSE="${VERBOSE:-false}"
     ASSUME_YES="${ASSUME_YES:-false}"
     SKIP_REQUIREMENTS_CHECK="${SKIP_REQUIREMENTS_CHECK:-false}"
+
+    validate_positive_integer "threads" "$THREADS"
+    validate_positive_integer "gpu-count" "$GPU_COUNT"
 }
 
 # Define pipeline steps
@@ -196,7 +426,7 @@ define_pipeline_steps() {
     PIPELINE_STEPS["alignment"]="scripts/alignment.sh"
     PIPELINE_STEPS["variant-calling"]="scripts/variant_calling.sh"
     PIPELINE_STEPS["annotation"]="scripts/vep_annotation.sh"
-    
+
     # Step descriptions
     declare -gA STEP_DESCRIPTIONS
     STEP_DESCRIPTIONS["quality-control"]="FastQC quality control analysis"
@@ -204,31 +434,57 @@ define_pipeline_steps() {
     STEP_DESCRIPTIONS["alignment"]="BWA alignment to reference genome"
     STEP_DESCRIPTIONS["variant-calling"]="bcftools variant calling"
     STEP_DESCRIPTIONS["annotation"]="VEP variant annotation"
-    
-    # Default step order
-    if [[ -n "$SPECIFIC_STEPS" ]]; then
-        IFS=',' read -ra STEP_ORDER <<< "$SPECIFIC_STEPS"
+
+    # Default step order / user-selected step order
+    if [[ -n "${SPECIFIC_STEPS:-}" ]]; then
+        local raw_steps=()
+        IFS=',' read -r -a raw_steps <<< "$SPECIFIC_STEPS"
+
+        STEP_ORDER=()
+        local raw_step=""
+        for raw_step in "${raw_steps[@]}"; do
+            local step
+            step="$(normalize_step_name "$raw_step")"
+
+            if [[ -z "$step" ]]; then
+                continue
+            fi
+
+            validate_step_name "$step" "step name in --steps"
+            STEP_ORDER+=("$step")
+        done
+
+        if [[ ${#STEP_ORDER[@]} -eq 0 ]]; then
+            print_cli_error "--steps was provided, but no valid steps were parsed."
+            echo "Example: --steps quality-control,data-cleaning" >&2
+            exit 2
+        fi
     else
-        STEP_ORDER=("quality-control" "data-cleaning" "alignment" "variant-calling" "annotation")
+        STEP_ORDER=("${AVAILABLE_STEPS[@]}")
     fi
-    
+
     # Handle resume functionality
-    if [[ -n "$RESUME_FROM" ]]; then
+    if [[ -n "${RESUME_FROM:-}" ]]; then
+        local resume_step
+        resume_step="$(normalize_step_name "$RESUME_FROM")"
+        validate_step_name "$resume_step" "resume step"
+
         local resume_index=-1
+        local i
         for i in "${!STEP_ORDER[@]}"; do
-            if [[ "${STEP_ORDER[$i]}" == "$RESUME_FROM" ]]; then
+            if [[ "${STEP_ORDER[$i]}" == "$resume_step" ]]; then
                 resume_index=$i
                 break
             fi
         done
-        
+
         if [[ $resume_index -ge 0 ]]; then
             STEP_ORDER=("${STEP_ORDER[@]:$resume_index}")
-            echo "🔄 Resuming pipeline from: $RESUME_FROM"
+            echo "🔄 Resuming pipeline from: $resume_step"
         else
-            echo "❌ Invalid resume step: $RESUME_FROM"
-            echo "Available steps: ${!PIPELINE_STEPS[*]}"
-            exit 1
+            print_cli_error "Resume step '$resume_step' is not included in selected --steps list."
+            echo "Selected steps: ${STEP_ORDER[*]}" >&2
+            exit 2
         fi
     fi
 }
@@ -238,20 +494,20 @@ run_pipeline_step() {
     local step_name="$1"
     local script_path="${PIPELINE_STEPS[$step_name]}"
     local description="${STEP_DESCRIPTIONS[$step_name]}"
-    
+
     if [[ ! -f "$SCRIPT_DIR/$script_path" ]]; then
-        echo "❌ Script not found: $script_path"
+        echo -e "${RED}❌ Script not found for step '$step_name': $script_path${NC}" >&2
         return 1
     fi
-    
+
     # Start step monitoring
     start_step "$step_name" "$description"
-    
+
     # Build command arguments
     local cmd_args=()
     cmd_args+=(--sample-id "$SAMPLE_ID")
     cmd_args+=(--threads "$THREADS")
-    
+
     # Add step-specific arguments
     case "$step_name" in
         "quality-control"|"data-cleaning")
@@ -269,57 +525,82 @@ run_pipeline_step() {
             cmd_args+=(--output-dir "$OUTPUT_DIR")
             ;;
     esac
-    
+
     if [[ "$DRY_RUN" == "true" ]]; then
         cmd_args+=(--dry-run)
     fi
-    
+
     if [[ "$VERBOSE" == "true" ]]; then
         cmd_args+=(--verbose)
     fi
-    
+
     # Execute the step
     local success=true
     if [[ "$DRY_RUN" == "true" ]]; then
         echo "🧪 Would run: $script_path ${cmd_args[*]}"
-        sleep 2  # Simulate execution time
+        sleep 1  # Simulate execution time while keeping tests fast
     else
-        if ! "$SCRIPT_DIR/$script_path" "${cmd_args[@]}"; then
+        if "$SCRIPT_DIR/$script_path" "${cmd_args[@]}"; then
+            :
+        else
+            local step_exit_code=$?
+            echo -e "${RED}❌ Step '$step_name' failed with exit code $step_exit_code.${NC}" >&2
+            echo "   Command: $script_path ${cmd_args[*]}" >&2
             success=false
         fi
     fi
-    
+
     # Complete step monitoring
     complete_step "$step_name" "$success"
-    
-    return $([ "$success" = true ] && echo 0 || echo 1)
+
+    [[ "$success" == "true" ]]
 }
 
 # Validate environment
 validate_environment() {
     echo "🔍 Validating environment..."
-    
+
     # Check if scripts directory exists
     if [[ ! -d "$SCRIPT_DIR/scripts" ]]; then
-        echo "❌ Scripts directory not found: $SCRIPT_DIR/scripts"
+        echo -e "${RED}❌ Scripts directory not found: $SCRIPT_DIR/scripts${NC}" >&2
         exit 1
     fi
-    
+
     # Check if required scripts exist
     local missing_scripts=()
+    local step=""
     for step in "${STEP_ORDER[@]}"; do
         local script_path="${PIPELINE_STEPS[$step]}"
         if [[ ! -f "$SCRIPT_DIR/$script_path" ]]; then
             missing_scripts+=("$script_path")
         fi
     done
-    
+
     if [[ ${#missing_scripts[@]} -gt 0 ]]; then
-        echo "❌ Missing scripts:"
-        printf '  %s\n' "${missing_scripts[@]}"
+        echo -e "${RED}❌ Missing scripts:${NC}" >&2
+        printf '  %s\n' "${missing_scripts[@]}" >&2
         exit 1
     fi
-    
+
+    # Validate input directory if early steps are requested.
+    local requires_raw_input=false
+    for step in "${STEP_ORDER[@]}"; do
+        if [[ "$step" == "quality-control" || "$step" == "data-cleaning" ]]; then
+            requires_raw_input=true
+            break
+        fi
+    done
+
+    if [[ "$requires_raw_input" == "true" && ! -d "$INPUT_DIR" ]]; then
+        if [[ "$DRY_RUN" == "true" ]]; then
+            echo -e "${YELLOW}⚠️ Input directory does not exist (dry-run continues): $INPUT_DIR${NC}"
+        else
+            echo -e "${RED}❌ Input directory not found: $INPUT_DIR${NC}" >&2
+            echo "   Provide --input-dir with FASTQ files, or run --dry-run to validate config only." >&2
+            exit 1
+        fi
+    fi
+
     # Run system requirements check if available
     if [[ "$SKIP_REQUIREMENTS_CHECK" == "true" ]]; then
         echo "⚠️ Skipping system requirements check (--skip-requirements-check)"
@@ -332,22 +613,22 @@ validate_environment() {
         fi
 
         if ! "$SCRIPT_DIR/scripts/check_requirements.sh" "${req_args[@]}"; then
-            echo "⚠️ System requirements check failed"
+            echo -e "${YELLOW}⚠️ System requirements check failed${NC}"
 
             if [[ "$ASSUME_YES" == "true" ]]; then
                 echo "⚠️ Continuing due to --yes"
             elif [[ ! -t 0 ]]; then
-                echo "❌ Non-interactive session: rerun with --yes or --skip-requirements-check to continue."
+                echo -e "${RED}❌ Non-interactive session:${NC} rerun with --yes or --skip-requirements-check to continue." >&2
                 exit 1
             else
-                read -p "Continue anyway? (y/N): " -r
-                if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                read -r -p "Continue anyway? (y/N): "
+                if [[ ! "$REPLY" =~ ^[Yy]$ ]]; then
                     exit 1
                 fi
             fi
         fi
     fi
-    
+
     echo "✅ Environment validation passed"
 }
 
@@ -361,19 +642,20 @@ show_pipeline_summary() {
     printf "Input Directory: %s\n" "$INPUT_DIR"
     printf "Output Directory: %s\n" "$OUTPUT_DIR"
     printf "Steps to Run: %s\n" "${STEP_ORDER[*]}"
+
     if [[ "$USE_GPU" == "true" ]]; then
         printf "Alignment Mode: GPU (%s, %s GPU)\n" "$GPU_ALIGNER" "$GPU_COUNT"
     else
         printf "Alignment Mode: CPU (BWA)\n"
     fi
-    
+
     if [[ "$ENABLE_NOTIFICATIONS" == "true" ]]; then
         printf "Notifications: Enabled"
         [[ -n "$EMAIL_ADDRESS" ]] && printf " (Email: %s)" "$EMAIL_ADDRESS"
         [[ -n "$SLACK_WEBHOOK" ]] && printf " (Slack: Enabled)"
         printf "\n"
     fi
-    
+
     if [[ "$DRY_RUN" == "true" ]]; then
         printf "Mode: DRY RUN (no actual processing)\n"
     fi
@@ -381,35 +663,53 @@ show_pipeline_summary() {
     if [[ "$SKIP_REQUIREMENTS_CHECK" == "true" ]]; then
         printf "Requirements Check: Skipped\n"
     fi
-    
+
     echo
+}
+
+handle_interrupt() {
+    echo
+    echo "⚠️ Pipeline interrupted by user"
+    if declare -F cleanup_progress_monitor >/dev/null 2>&1; then
+        cleanup_progress_monitor
+    fi
+    exit 1
 }
 
 # Main execution
 main() {
     parse_arguments "$@"
     set_defaults
+
+    # Require bash4+ only for actual execution path (help works everywhere).
+    require_bash4_or_die
+
+    # Source progress monitoring after bash compatibility check.
+    # shellcheck disable=SC1091
+    source "$SCRIPT_DIR/scripts/progress_monitor.sh"
+
     define_pipeline_steps
-    
+
     # Show summary
     show_pipeline_summary
-    
+
     # Validate environment
     validate_environment
-    
+
     # Initialize progress monitoring
     init_progress_monitor "WGS_Pipeline_${SAMPLE_ID}" "${#STEP_ORDER[@]}" "logs"
-    
+
     # Enable notifications if configured
     if [[ "$ENABLE_NOTIFICATIONS" == "true" ]]; then
         enable_notifications "$EMAIL_ADDRESS" "$SLACK_WEBHOOK"
         send_notification "Started" "WGS Pipeline started for sample: $SAMPLE_ID" "info"
     fi
-    
+
     # Run pipeline steps
     local pipeline_success=true
     local failed_step=""
-    
+
+    local step=""
     for step in "${STEP_ORDER[@]}"; do
         if ! run_pipeline_step "$step"; then
             pipeline_success=false
@@ -417,13 +717,13 @@ main() {
             break
         fi
     done
-    
+
     # Show resource summary
     show_resource_summary
-    
+
     # Finish monitoring
     finish_progress_monitor "$pipeline_success"
-    
+
     # Final status
     if [[ "$pipeline_success" == "true" ]]; then
         echo "🎉 Pipeline completed successfully!"
@@ -437,7 +737,7 @@ main() {
 }
 
 # Handle interrupts
-trap 'echo; echo "⚠️ Pipeline interrupted by user"; cleanup_progress_monitor; exit 1' INT TERM
+trap handle_interrupt INT TERM
 
 # Run main function
 main "$@"
