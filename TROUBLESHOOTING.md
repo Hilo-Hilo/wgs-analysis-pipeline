@@ -93,6 +93,114 @@ Check that your reference genome matches your sample species and build (GRCh38 f
 
 Adjust `VARIANT_MIN_DEPTH` and `VARIANT_MIN_QUALITY` in your config.
 
+## VEP Annotation Errors
+
+### Exit Codes Reference
+
+| Code | Meaning | Action |
+|------|---------|--------|
+| 10 | VEP not installed | `conda install -c bioconda ensembl-vep` |
+| 11 | bcftools not installed | `conda install -c bioconda bcftools` |
+| 12 | Input VCF not found | Check file path, run variant calling first |
+| 13 | Malformed VCF | See "Malformed VCF" section below |
+| 14 | Empty VCF (no variants) | Use `--skip-empty-check` if expected |
+| 15 | Invalid VEP cache | See "VEP cache issues" section below |
+| 16 | Insufficient memory | Use `--buffer-size 500 --threads 1` |
+| 17 | VEP execution failed | Check `logs/annotation.log` for details |
+| 18 | Post-processing failed | Annotated VCF may be incomplete |
+
+### VEP not found
+
+VEP (Ensembl Variant Effect Predictor) is optional for the core pipeline but required for annotation.
+
+```bash
+# Install via conda
+conda install -c bioconda ensembl-vep
+
+# Or via Docker
+docker pull ensemblorg/ensembl-vep
+
+# Verify installation
+vep --help
+```
+
+### VEP cache issues
+
+VEP requires a local cache for offline annotation:
+
+```bash
+# Download GRCh38 cache (requires ~15GB disk space)
+vep_install -a cf -s homo_sapiens -y GRCh38 -c /path/to/vep_cache
+
+# Check cache directory
+ls -la /path/to/vep_cache/homo_sapiens/
+
+# Validate before running
+./scripts/vep_annotation.sh --validate-only --cache-dir /path/to/vep_cache
+```
+
+### Malformed VCF errors
+
+If VCF validation fails:
+
+```bash
+# Check VCF format
+bcftools view -H input.vcf.gz | head
+
+# Validate VCF
+bcftools view -h input.vcf.gz
+
+# Repair common issues
+bcftools norm -c ws input.vcf.gz -O z -o fixed.vcf.gz
+```
+
+### Empty VCF (no variants)
+
+All variants may have been filtered out during variant calling:
+
+```bash
+# Check variant count
+bcftools view -H results/variants/*_filtered.vcf.gz | wc -l
+
+# If intentional, proceed with:
+./scripts/vep_annotation.sh --skip-empty-check
+```
+
+### Out of memory during annotation
+
+VEP can be memory-intensive. For 16GB systems:
+
+```bash
+# Reduce buffer size and threads
+./scripts/vep_annotation.sh --buffer-size 500 --threads 1 --min-memory-gb 4
+
+# Monitor memory during annotation
+watch -n 5 'free -h'
+```
+
+### Resuming interrupted annotation
+
+If annotation is interrupted, use resume mode:
+
+```bash
+./scripts/vep_annotation.sh --resume
+
+# Or force a fresh start
+./scripts/vep_annotation.sh --force
+```
+
+### Dry run for validation
+
+Before running annotation, validate setup:
+
+```bash
+# Check all prerequisites without running
+./scripts/vep_annotation.sh --validate-only --verbose
+
+# Preview what would happen
+./scripts/vep_annotation.sh --dry-run --verbose
+```
+
 ## Quality Benchmarks
 
 | Metric | Good | Investigate |
